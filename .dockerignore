@@ -1,0 +1,41 @@
+# VCS and editor
+.git
+.gitignore
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# Env files (keep example)
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.venv
+env/
+venv/
+
+# Node/Frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+npm-debug.log*
+yarn-error.log*
+
+# Build artifacts
+dist/
+build/
+
+# Local data (mounted as volumes at runtime)
+data/
+indices/
+
+# OS / temp
+*.log
+*.tmp
+*.pid

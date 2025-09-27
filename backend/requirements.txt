@@ -1,0 +1,5 @@
+fastapi
+uvicorn[standard]
+raganything[all]
+python-multipart
+pydantic>=2
