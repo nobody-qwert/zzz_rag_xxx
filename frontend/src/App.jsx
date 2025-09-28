@@ -23,45 +23,49 @@ function NavigationBar({ systemStatus, currentPath, onNavigate }) {
   const isOnIngest = currentPath === "/ingest";
 
   return (
-    <nav style={{ padding: "8px 16px", borderBottom: "1px solid #4443", display: "flex", gap: 16, alignItems: "center" }}>
-      <button
-        onClick={() => onNavigate("/ingest")}
-        disabled={isOnChat && systemStatus.asking}
-        style={{
-          ...styles.navButton,
-          background: isOnIngest ? "#4a90e22a" : "transparent",
-          opacity: (isOnChat && systemStatus.asking) ? 0.5 : 1,
-          cursor: (isOnChat && systemStatus.asking) ? "not-allowed" : "pointer"
-        }}
-      >
-        Ingest Docs
-      </button>
-      
-      {/* Only show chat button when documents are ready and no jobs are running */}
-      {canNavigateToChat && (
-        <button
-          onClick={() => onNavigate("/chat")}
-          style={{
-            ...styles.navButton,
-            background: isOnChat ? "#4a90e22a" : "transparent"
-          }}
-        >
-          Chat
-        </button>
-      )}
+    <nav style={styles.navShell}>
+      <div style={styles.navInner}>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <button
+            onClick={() => onNavigate("/ingest")}
+            disabled={isOnChat && systemStatus.asking}
+            style={{
+              ...styles.navButton,
+              background: isOnIngest ? "rgba(84, 105, 255, 0.2)" : "transparent",
+              opacity: (isOnChat && systemStatus.asking) ? 0.5 : 1,
+              cursor: (isOnChat && systemStatus.asking) ? "not-allowed" : "pointer"
+            }}
+          >
+            Ingest Docs
+          </button>
 
-      {systemStatus.has_running_jobs && (
-        <span style={styles.muted}>
-          Processing {systemStatus.running_jobs.length} job(s)...
-        </span>
-      )}
-      
-      {/* Show status message when chat is not available */}
-      {(!systemStatus.ready || systemStatus.docs_count === 0) && !systemStatus.has_running_jobs && (
-        <span style={styles.muted}>
-          Upload documents to enable chat
-        </span>
-      )}
+          {canNavigateToChat && (
+            <button
+              onClick={() => onNavigate("/chat")}
+              style={{
+                ...styles.navButton,
+                background: isOnChat ? "rgba(84, 105, 255, 0.2)" : "transparent"
+              }}
+            >
+              Chat
+            </button>
+          )}
+        </div>
+
+        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
+          {systemStatus.has_running_jobs && (
+            <span style={styles.muted}>
+              Processing {systemStatus.running_jobs.length} job(s)...
+            </span>
+          )}
+
+          {(!systemStatus.ready || systemStatus.docs_count === 0) && !systemStatus.has_running_jobs && (
+            <span style={styles.muted}>
+              Upload documents to enable chat
+            </span>
+          )}
+        </div>
+      </div>
     </nav>
   );
 }
@@ -166,11 +170,22 @@ function AppContent() {
     setSystemStatus(prev => ({ ...prev, asking }));
   };
 
+  const statusLabel = systemStatus.has_running_jobs
+    ? "Processing"
+    : systemStatus.ready
+    ? "Ready"
+    : "Standby";
+
   return (
-    <div>
-      <header style={styles.header}>
-        <h1 style={{ margin: 0, fontSize: 16 }}>RAG-Anything Demo</h1>
-        <span style={styles.muted}>Upload documents, then ask questions</span>
+    <div style={styles.appShell}>
+      <header style={styles.headerShell}>
+        <div style={styles.barInner}>
+          <div>
+            <h1 style={styles.appTitle}>RAG-Anything Demo</h1>
+            <span style={styles.tagline}>Upload documents, then ask questions</span>
+          </div>
+          <div style={styles.statusPill}>{statusLabel}</div>
+        </div>
       </header>
 
       <NavigationBar 
@@ -180,24 +195,26 @@ function AppContent() {
       />
 
       <main style={styles.main}>
-        <Routes>
-          <Route path="/ingest" element={<IngestPage systemStatus={systemStatus} />} />
-          <Route
-            path="/chat"
-            element={
-              systemStatus.ready && systemStatus.docs_count > 0 && !systemStatus.has_running_jobs ? (
-                <ChatPage
-                  onAskingChange={updateAskingStatus}
-                  warmupApi={api.warmup}
-                  llmReady={systemStatus.llm_ready}
-                />
-              ) : (
-                <Navigate to="/ingest" replace />
-              )
-            }
-          />
-          <Route path="/" element={<Navigate to="/ingest" replace />} />
-        </Routes>
+        <div style={styles.content}>
+          <Routes>
+            <Route path="/ingest" element={<IngestPage systemStatus={systemStatus} />} />
+            <Route
+              path="/chat"
+              element={
+                systemStatus.ready && systemStatus.docs_count > 0 && !systemStatus.has_running_jobs ? (
+                  <ChatPage
+                    onAskingChange={updateAskingStatus}
+                    warmupApi={api.warmup}
+                    llmReady={systemStatus.llm_ready}
+                  />
+                ) : (
+                  <Navigate to="/ingest" replace />
+                )
+              }
+            />
+            <Route path="/" element={<Navigate to="/ingest" replace />} />
+          </Routes>
+        </div>
       </main>
     </div>
   );
@@ -212,28 +229,85 @@ export default function App() {
 }
 
 const styles = {
-  header: {
-    padding: "12px 16px",
-    borderBottom: "1px solid #4443",
+  appShell: {
+    minHeight: "100vh",
     display: "flex",
+    flexDirection: "column",
+    background: "radial-gradient(circle at top left, rgba(45, 55, 95, 0.35), rgba(15, 17, 23, 0.98) 55%)",
+    color: "#f4f6fb",
+  },
+  headerShell: {
+    borderBottom: "1px solid rgba(148, 163, 184, 0.16)",
+    background: "rgba(15, 17, 23, 0.92)",
+    backdropFilter: "blur(12px)",
+  },
+  barInner: {
+    maxWidth: "1200px",
+    margin: "0 auto",
+    padding: "20px 32px",
+    display: "flex",
+    flexWrap: "wrap",
     alignItems: "center",
-    gap: 12,
+    justifyContent: "space-between",
+    gap: 16,
+  },
+  appTitle: {
+    margin: 0,
+    fontSize: 22,
+    fontWeight: 600,
+    letterSpacing: 0.3,
+  },
+  tagline: {
+    display: "block",
+    fontSize: 14,
+    color: "rgba(148, 163, 184, 0.82)",
+    marginTop: 4,
+  },
+  statusPill: {
+    padding: "6px 12px",
+    borderRadius: 999,
+    border: "1px solid rgba(56, 189, 248, 0.35)",
+    color: "rgba(125, 211, 252, 0.92)",
+    fontSize: 12,
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+  },
+  navShell: {
+    borderBottom: "1px solid rgba(148, 163, 184, 0.12)",
+    background: "rgba(12, 14, 22, 0.85)",
+    backdropFilter: "blur(10px)",
+  },
+  navInner: {
+    maxWidth: "1200px",
+    margin: "0 auto",
+    padding: "12px 32px",
+    display: "flex",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 16,
   },
   main: {
-    padding: 16,
+    flex: 1,
+    padding: "32px 24px 48px",
+  },
+  content: {
+    maxWidth: "1200px",
+    margin: "0 auto",
+    width: "100%",
   },
   navButton: {
     font: "inherit",
-    padding: "8px 12px",
-    borderRadius: 6,
-    border: "1px solid #4443",
+    padding: "10px 16px",
+    borderRadius: 999,
+    border: "1px solid rgba(84, 105, 255, 0.4)",
     background: "transparent",
-    color: "#4a90e2",
+    color: "#9db9ff",
     textDecoration: "none",
+    transition: "background 0.2s ease, border 0.2s ease",
   },
-  muted: { 
-    opacity: 0.7, 
-    fontSize: 12,
-    color: "#666"
+  muted: {
+    fontSize: 13,
+    color: "rgba(148, 163, 184, 0.8)",
   },
 };

@@ -38,37 +38,108 @@ function formatDate(value) {
 }
 
 const styles = {
-  card: {
-    border: "1px solid #4443",
-    borderRadius: 8,
-    padding: 12,
-    background: "transparent",
+  page: {
+    display: "grid",
+    gap: 24,
+    gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+    alignItems: "start",
   },
-  row: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" },
+  leftColumn: {
+    display: "grid",
+    gap: 24,
+  },
+  card: {
+    border: "1px solid rgba(148, 163, 184, 0.18)",
+    borderRadius: 18,
+    padding: "24px 28px",
+    background: "rgba(13, 16, 24, 0.9)",
+    boxShadow: "0 22px 45px rgba(2, 6, 23, 0.35)",
+  },
+  sectionHeader: {
+    display: "flex",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+    gap: 16,
+    marginBottom: 16,
+  },
+  sectionTitle: {
+    margin: 0,
+    fontSize: 18,
+    fontWeight: 600,
+    letterSpacing: 0.2,
+  },
+  badge: {
+    padding: "4px 10px",
+    borderRadius: 999,
+    border: "1px solid rgba(148, 163, 184, 0.4)",
+    fontSize: 12,
+    color: "rgba(148, 163, 184, 0.85)",
+    whiteSpace: "nowrap",
+  },
+  row: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    flexWrap: "wrap",
+  },
   button: {
     font: "inherit",
-    padding: "8px 10px",
-    borderRadius: 6,
-    border: "1px solid #4443",
-    background: "transparent",
+    padding: "10px 16px",
+    borderRadius: 12,
+    border: "1px solid rgba(84, 105, 255, 0.45)",
+    background: "linear-gradient(135deg, rgba(84, 105, 255, 0.18), rgba(84, 105, 255, 0.05))",
+    color: "#c7d7ff",
+    cursor: "pointer",
+    transition: "transform 0.15s ease, box-shadow 0.15s ease",
+  },
+  subtleButton: {
+    font: "inherit",
+    padding: "6px 10px",
+    borderRadius: 10,
+    border: "1px solid rgba(148, 163, 184, 0.35)",
+    background: "rgba(15, 17, 23, 0.6)",
+    color: "rgba(226, 232, 240, 0.88)",
     cursor: "pointer",
   },
   input: {
     font: "inherit",
-    padding: "8px 10px",
-    borderRadius: 6,
-    border: "1px solid #4443",
-    background: "transparent",
+    padding: "10px 14px",
+    borderRadius: 12,
+    border: "1px solid rgba(148, 163, 184, 0.35)",
+    background: "rgba(9, 11, 18, 0.8)",
+    color: "inherit",
+    minWidth: 0,
+  },
+  feedback: {
+    marginTop: 10,
+    fontSize: 13,
+    color: "rgba(148, 163, 184, 0.85)",
   },
   docs: {
-    maxHeight: "40vh",
+    maxHeight: "55vh",
     overflow: "auto",
-    border: "1px dashed #4443",
-    borderRadius: 6,
-    padding: 8,
+    border: "1px solid rgba(148, 163, 184, 0.12)",
+    borderRadius: 14,
+    padding: 16,
+    background: "rgba(9, 11, 18, 0.75)",
   },
-  muted: { opacity: 0.7, fontSize: 12 },
-  error: { fontSize: 12, color: "#b00020" },
+  listItem: {
+    padding: "12px 10px",
+    borderRadius: 10,
+    background: "rgba(23, 25, 35, 0.75)",
+    border: "1px solid rgba(148, 163, 184, 0.08)",
+    marginBottom: 8,
+  },
+  muted: {
+    opacity: 0.75,
+    fontSize: 13,
+    color: "rgba(148, 163, 184, 0.8)",
+  },
+  error: {
+    fontSize: 13,
+    color: "#ff8f8f",
+    marginTop: 6,
+  },
 };
 
 export default function IngestPage({ systemStatus = {} }) {
@@ -224,87 +295,113 @@ export default function IngestPage({ systemStatus = {} }) {
   }, [jobId, jobSummaries, refreshDocs]);
 
   return (
-    <div style={styles.card}>
-      {jobSummaries.length > 0 && (
+    <div style={styles.page}>
+      <div style={styles.leftColumn}>
         <section style={styles.card}>
-          <div style={{ ...styles.row, justifyContent: "space-between", marginBottom: 8 }}>
-            <h3 style={{ margin: 0, fontSize: 16 }}>Ingestion Jobs</h3>
-            <span style={styles.muted}>
+          <div style={styles.sectionHeader}>
+            <h3 style={styles.sectionTitle}>Ingestion Jobs</h3>
+            <span style={styles.badge}>
               {systemStatus.has_running_jobs
-                ? `Processing ${activeJobCount || runningJobs.length} job(s)…`
-                : "No active jobs"}
+                ? `Processing ${activeJobCount || runningJobs.length} job(s)`
+                : jobSummaries.length
+                ? `${jobSummaries.length} job${jobSummaries.length > 1 ? "s" : ""} tracked`
+                : "Idle"}
             </span>
           </div>
-          <ul style={{ margin: 0, paddingLeft: 16 }}>
-            {jobSummaries.map((job) => (
-              <li key={job.job_id} style={{ marginBottom: 4 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  {job.file || job.job_id}
-                  {job.doc_hash && (
-                    <span style={styles.muted}> · {shortHash(job.doc_hash)}</span>
-                  )}
-                  {job.doc_hash && String(job.status || "").toLowerCase().startsWith("error") && (
-                    <button
-                      style={{ ...styles.button, padding: "4px 8px" }}
-                      onClick={() => handleRetry(job.doc_hash)}
-                      disabled={retryingHash === job.doc_hash}
-                    >
-                      {retryingHash === job.doc_hash ? "Retrying…" : "Retry"}
-                    </button>
-                  )}
-                </div>
-                <div style={styles.muted}>
-                  {job.status || "unknown"}
-                  {job.error ? ` – ${job.error}` : ""}
-                </div>
-              </li>
-            ))}
-          </ul>
+          {jobSummaries.length === 0 ? (
+            <div style={styles.muted}>No jobs yet. Upload a document to kick things off.</div>
+          ) : (
+            <ul style={{ margin: 0, paddingLeft: 0, listStyle: "none" }}>
+              {jobSummaries.map((job) => (
+                <li key={job.job_id} style={styles.listItem}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                    <div>
+                      <strong>{job.file || job.job_id}</strong>
+                      {job.doc_hash && (
+                        <span style={styles.muted}> · {shortHash(job.doc_hash)}</span>
+                      )}
+                    </div>
+                    {job.doc_hash && String(job.status || "").toLowerCase().startsWith("error") && (
+                      <button
+                        style={styles.subtleButton}
+                        onClick={() => handleRetry(job.doc_hash)}
+                        disabled={retryingHash === job.doc_hash}
+                      >
+                        {retryingHash === job.doc_hash ? "Retrying…" : "Retry"}
+                      </button>
+                    )}
+                  </div>
+                  <div style={styles.muted}>
+                    {job.status || "unknown"}
+                    {job.error ? ` – ${job.error}` : ""}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
-      )}
+
+        <section style={styles.card}>
+          <div style={styles.sectionHeader}>
+            <h3 style={styles.sectionTitle}>Upload Documents</h3>
+            <span style={styles.badge}>
+              {processing ? "Processing" : uploading ? "Uploading" : "Ready"}
+            </span>
+          </div>
+          <div style={styles.row}>
+            <input type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} style={styles.input} />
+            <button
+              onClick={handleUpload}
+              disabled={uploading || processing || !file}
+              style={{
+                ...styles.button,
+                opacity: uploading || processing || !file ? 0.6 : 1,
+                cursor: uploading || processing || !file ? "not-allowed" : "pointer",
+              }}
+            >
+              {uploading ? "Uploading…" : processing ? "Processing…" : "Ingest"}
+            </button>
+          </div>
+          <div style={styles.feedback}>{uploadStatus || "Supported formats include PDFs, text files, and markdown."}</div>
+        </section>
+      </div>
 
       <section style={styles.card}>
-        <div style={styles.row}>
-          <input type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} style={styles.input} />
-          <button
-            onClick={handleUpload}
-            disabled={uploading || processing || !file}
-            style={styles.button}
-          >
-            {uploading ? "Uploading…" : processing ? "Processing…" : "Ingest"}
-          </button>
-        </div>
-        <div className="muted" style={styles.muted}>{uploadStatus}</div>
-      </section>
-
-      <section style={styles.card}>
-        <div style={{ ...styles.row, justifyContent: "space-between", marginBottom: 8 }}>
-          <div style={{ display: "flex", flexDirection: "column" }}>
-            <h3 style={{ margin: 0, fontSize: 16 }}>Documents</h3>
+        <div style={styles.sectionHeader}>
+          <div>
+            <h3 style={styles.sectionTitle}>Document Library</h3>
             <span style={styles.muted}>
               {`${systemStatus.docs_count || 0} ready / ${systemStatus.total_docs || docs.length}`}
             </span>
           </div>
-          <button onClick={refreshDocs} disabled={docsLoading} style={styles.button}>
+          <button
+            onClick={refreshDocs}
+            disabled={docsLoading}
+            style={{
+              ...styles.subtleButton,
+              opacity: docsLoading ? 0.6 : 1,
+              cursor: docsLoading ? "wait" : "pointer",
+            }}
+          >
             {docsLoading ? "Refreshing…" : "Refresh"}
           </button>
         </div>
         <div style={{ ...styles.docs, ...(docs.length ? {} : styles.muted) }}>
           {docs.length === 0 ? (
-            <div>No documents yet.</div>
+            <div>No documents yet. Upload files to build your knowledge base.</div>
           ) : (
-            <ul style={{ margin: 0, paddingLeft: 16 }}>
+            <ul style={{ margin: 0, paddingLeft: 0, listStyle: "none" }}>
               {docs.map((d) => (
-                <li key={d.hash || d.stored_name || d.name} style={{ marginBottom: 6 }}>
+                <li key={d.hash || d.stored_name || d.name} style={styles.listItem}>
                   <div title={d.path}>
-                    {d.name}{" "}
+                    <strong>{d.name}</strong>{" "}
                     <span style={styles.muted}>
                       {`${prettyBytes(d.size)} · ${(d.status || "unknown").toLowerCase()}`}
                       {d.hash ? ` · ${shortHash(d.hash)}` : ""}
                     </span>
                     {String(d.status || "").toLowerCase() === "error" && d.hash && (
                       <button
-                        style={{ ...styles.button, marginLeft: 8, padding: "4px 8px" }}
+                        style={{ ...styles.subtleButton, marginLeft: 8 }}
                         onClick={() => handleRetry(d.hash)}
                         disabled={retryingHash === d.hash}
                       >

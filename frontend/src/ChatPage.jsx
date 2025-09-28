@@ -32,46 +32,119 @@ function shortHash(hash) {
 }
 
 const styles = {
-  card: {
-    border: "1px solid #4443",
-    borderRadius: 8,
-    padding: 12,
-    background: "transparent",
+  page: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 24,
+    alignItems: "stretch",
   },
-  row: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" },
+  chatCard: {
+    flex: "2 1 540px",
+    border: "1px solid rgba(148, 163, 184, 0.18)",
+    borderRadius: 20,
+    padding: "28px 32px",
+    background: "rgba(13, 16, 24, 0.92)",
+    boxShadow: "0 22px 45px rgba(2, 6, 23, 0.35)",
+    display: "grid",
+    gap: 20,
+    alignContent: "start",
+  },
+  sideCard: {
+    flex: "1 1 320px",
+    border: "1px solid rgba(148, 163, 184, 0.18)",
+    borderRadius: 20,
+    padding: "28px 24px",
+    background: "rgba(13, 16, 24, 0.88)",
+    boxShadow: "0 18px 38px rgba(2, 6, 23, 0.32)",
+    display: "grid",
+    gap: 16,
+    alignContent: "start",
+    maxHeight: "calc(100vh - 220px)",
+    overflow: "hidden",
+  },
+  sectionHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 16,
+  },
+  sectionTitle: {
+    margin: 0,
+    fontSize: 20,
+    fontWeight: 600,
+    letterSpacing: 0.25,
+  },
+  badge: {
+    padding: "6px 12px",
+    borderRadius: 999,
+    border: "1px solid rgba(148, 163, 184, 0.35)",
+    fontSize: 12,
+    color: "rgba(148, 163, 184, 0.85)",
+    whiteSpace: "nowrap",
+  },
   button: {
     font: "inherit",
-    padding: "8px 10px",
-    borderRadius: 6,
-    border: "1px solid #4443",
-    background: "transparent",
+    padding: "10px 18px",
+    borderRadius: 14,
+    border: "1px solid rgba(84, 105, 255, 0.45)",
+    background: "linear-gradient(135deg, rgba(84, 105, 255, 0.18), rgba(84, 105, 255, 0.05))",
+    color: "#c7d7ff",
+    cursor: "pointer",
+    transition: "transform 0.15s ease, box-shadow 0.15s ease",
+  },
+  subtleButton: {
+    font: "inherit",
+    padding: "8px 14px",
+    borderRadius: 12,
+    border: "1px solid rgba(148, 163, 184, 0.35)",
+    background: "rgba(15, 17, 23, 0.6)",
+    color: "rgba(226, 232, 240, 0.9)",
     cursor: "pointer",
   },
   input: {
     font: "inherit",
-    padding: "8px 10px",
-    borderRadius: 6,
-    border: "1px solid #4443",
-    background: "transparent",
+    padding: "12px 16px",
+    borderRadius: 14,
+    border: "1px solid rgba(148, 163, 184, 0.35)",
+    background: "rgba(9, 11, 18, 0.82)",
+    color: "inherit",
+    flex: 1,
+    minWidth: 0,
   },
-  docs: {
-    maxHeight: "40vh",
-    overflow: "auto",
-    border: "1px dashed #4443",
-    borderRadius: 6,
-    padding: 8,
+  muted: {
+    fontSize: 13,
+    color: "rgba(148, 163, 184, 0.78)",
   },
-  muted: { opacity: 0.7, fontSize: 12 },
   messages: {
-    minHeight: 240,
-    maxHeight: "60vh",
+    minHeight: 280,
+    maxHeight: "55vh",
     overflow: "auto",
-    border: "1px dashed #4443",
-    borderRadius: 6,
-    padding: 8,
+    border: "1px solid rgba(148, 163, 184, 0.12)",
+    borderRadius: 16,
+    padding: 18,
+    background: "rgba(9, 11, 18, 0.78)",
     whiteSpace: "pre-wrap",
   },
-  answer: { padding: 8, borderRadius: 6, background: "#4a90e22a" },
+  answer: {
+    padding: 16,
+    borderRadius: 14,
+    background: "rgba(84, 105, 255, 0.18)",
+    lineHeight: 1.55,
+  },
+  docs: {
+    overflow: "auto",
+    border: "1px solid rgba(148, 163, 184, 0.12)",
+    borderRadius: 14,
+    padding: 16,
+    background: "rgba(9, 11, 18, 0.72)",
+  },
+  listItem: {
+    padding: "10px 8px",
+    borderRadius: 10,
+    marginBottom: 6,
+    background: "rgba(23, 25, 35, 0.7)",
+    border: "1px solid rgba(148, 163, 184, 0.08)",
+  },
   kbd: {
     fontFamily:
       'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
@@ -184,21 +257,31 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady }) {
   };
 
   return (
-    <div style={styles.card}>
-      <section>
-        <div style={{ ...styles.row, justifyContent: "space-between", marginBottom: 8 }}>
-          <h3 style={{ margin: 0, fontSize: 16 }}>Chat</h3>
-          <button onClick={() => navigate("/ingest")} style={styles.button}>
+    <div style={styles.page}>
+      <section style={styles.chatCard}>
+        <div style={styles.sectionHeader}>
+          <h2 style={styles.sectionTitle}>Chat Workspace</h2>
+          <button
+            onClick={() => navigate("/ingest")}
+            style={{ ...styles.subtleButton, padding: "8px 16px" }}
+          >
             Back to Ingestion
           </button>
         </div>
+
         {warmingUp && !llmReady && (
-          <div style={{ ...styles.muted, marginBottom: 8, padding: 8, background: "#fff3cd", borderRadius: 4 }}>
+          <div style={{
+            ...styles.muted,
+            background: "rgba(250, 204, 21, 0.12)",
+            border: "1px solid rgba(250, 204, 21, 0.24)",
+            padding: 12,
+            borderRadius: 12,
+          }}>
             🔥 Warming up LM Studio model... Please wait.
           </div>
         )}
 
-        <div style={styles.row}>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
           <input
             type="text"
             placeholder={warmingUp && !warmedUp ? "Warming up model..." : "Ask a question about your docs..."}
@@ -208,18 +291,18 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady }) {
               if (e.key === "Enter" && !(warmingUp && !warmedUp)) handleAsk();
             }}
             disabled={warmingUp && !warmedUp}
-            style={{ 
-              ...styles.input, 
-              flex: 1,
-              opacity: warmingUp && !warmedUp ? 0.6 : 1
+            style={{
+              ...styles.input,
+              opacity: warmingUp && !warmedUp ? 0.6 : 1,
             }}
           />
-          <button 
-            onClick={handleAsk} 
-            disabled={asking || !query.trim() || (warmingUp && !warmedUp)} 
+          <button
+            onClick={handleAsk}
+            disabled={asking || !query.trim() || (warmingUp && !warmedUp)}
             style={{
               ...styles.button,
-              opacity: (asking || !query.trim() || (warmingUp && !warmedUp)) ? 0.6 : 1
+              opacity: (asking || !query.trim() || (warmingUp && !warmedUp)) ? 0.6 : 1,
+              cursor: (asking || !query.trim() || (warmingUp && !warmedUp)) ? "not-allowed" : "pointer",
             }}
           >
             {asking ? "Asking..." : warmingUp && !warmedUp ? "Warming up..." : "Ask"}
@@ -239,11 +322,11 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady }) {
             <div>
               <div style={styles.answer}>{answer}</div>
               {!!sources?.length && (
-                <div style={{ ...styles.muted, marginTop: 8 }}>
-                  <div style={{ fontWeight: 600, marginBottom: 4 }}>Sources</div>
-                  <ol style={{ margin: 0, paddingLeft: 16 }}>
+                <div style={{ ...styles.muted, marginTop: 12 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 6 }}>Sources</div>
+                  <ol style={{ margin: 0, paddingLeft: 18 }}>
                     {sources.map((s, i) => (
-                      <li key={i} style={{ marginBottom: 4 }}>
+                      <li key={i} style={{ marginBottom: 6 }}>
                         <code style={styles.kbd}>{summarizeSource(s)}</code>
                       </li>
                     ))}
@@ -255,21 +338,24 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady }) {
         </div>
       </section>
 
-      <section style={{ marginTop: 16 }}>
-        <h3 style={{ margin: "0 0 8px 0", fontSize: 16 }}>Ingested Documents</h3>
+      <section style={styles.sideCard}>
+        <div style={styles.sectionHeader}>
+          <h2 style={{ ...styles.sectionTitle, fontSize: 18 }}>Ingested Documents</h2>
+          <span style={styles.badge}>{docs.length} file{docs.length === 1 ? "" : "s"}</span>
+        </div>
         <div style={{ ...styles.docs, ...(docs.length ? {} : styles.muted) }}>
           {docs.length === 0 ? (
-            <div>No documents yet.</div>
+            <div>No documents yet. Head back to ingestion to add some.</div>
           ) : (
-            <ul style={{ margin: 0, paddingLeft: 16 }}>
+            <ul style={{ margin: 0, paddingLeft: 0, listStyle: "none" }}>
               {docs.map((d) => (
-                <li key={d.hash || d.stored_name || d.name}>
-                  <span title={d.path}>
-                    {d.name}{" "}
+                <li key={d.hash || d.stored_name || d.name} style={styles.listItem}>
+                  <div title={d.path}>
+                    <strong>{d.name}</strong>{" "}
                     <span style={styles.muted}>
                       {`${prettyBytes(d.size)}${d.hash ? ` · ${shortHash(d.hash)}` : ""}`}
                     </span>
-                  </span>
+                  </div>
                 </li>
               ))}
             </ul>
