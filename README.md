@@ -1,4 +1,4 @@
-# CONCLUSION For Local Setup*
+# ***CONCLUSION For Local Setup***
 
 - Running it on local system is painfully slow. 260 Page doc graph extraction took more than an hour.
 - Too complex. The gain versus a simple Embedding + LLM Setup is not so big to justify this complexity and Time for LLM KG extraction.
