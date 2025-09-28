@@ -1,3 +1,11 @@
+*CONCLUSION For Local Setup*
+
+- Running it on local system is painfully slow. 260 Page doc graph extraction took more than an hour.
+- Too complex. The gain versus a simple Embedding + LLM Setup is not so big to justify this complexity and Time for LLM KG extraction.
+- Performance for RAG was no good at with LLM -> Qwen3-30b-a3b-2507 and Embedding -> nomic-embed-text-v1.5 + This Knowledge graph magic
+- Chat is also slow!
+- Using LLM + Gemma 300 embedding model is much better and super fast in same local setup.
+
 # RAG-Anything + Remote LM Studio Integration
 
 A complete RAG (Retrieval-Augmented Generation) application that integrates RAG-Anything with LM Studio for document processing and intelligent querying. Features a React frontend and FastAPI backend, all containerized with Docker Compose.
