@@ -39,3 +39,4 @@ data/*
 !data/.gitkeep
 indices/*
 !indices/.gitkeep
+sample_RAG-anything/
