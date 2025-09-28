@@ -4,3 +4,4 @@ raganything[all]
 python-multipart
 pydantic>=2
 openai>=1.0.0
+aiosqlite

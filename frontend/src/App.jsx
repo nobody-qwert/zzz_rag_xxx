@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 
 async function readJsonSafe(res) {
   const ct = (res.headers.get("content-type") || "").toLowerCase();
@@ -13,122 +14,157 @@ async function readJsonSafe(res) {
   return { nonJson: true, raw };
 }
 
-function Section({ title, right, children }) {
+import IngestPage from "./IngestPage";
+import ChatPage from "./ChatPage";
+
+function NavigationBar({ systemStatus, currentPath, onNavigate }) {
+  const canNavigateToChat = systemStatus.ready && systemStatus.docs_count > 0 && !systemStatus.has_running_jobs;
+  const isOnChat = currentPath === "/chat";
+  const isOnIngest = currentPath === "/ingest";
+
   return (
-    <section style={styles.card}>
-      <div style={{ ...styles.row, justifyContent: "space-between", marginBottom: 8 }}>
-        <h3 style={{ margin: 0, fontSize: 16 }}>{title}</h3>
-        {right}
-      </div>
-      {children}
-    </section>
+    <nav style={{ padding: "8px 16px", borderBottom: "1px solid #4443", display: "flex", gap: 16, alignItems: "center" }}>
+      <button
+        onClick={() => onNavigate("/ingest")}
+        disabled={isOnChat && systemStatus.asking}
+        style={{
+          ...styles.navButton,
+          background: isOnIngest ? "#4a90e22a" : "transparent",
+          opacity: (isOnChat && systemStatus.asking) ? 0.5 : 1,
+          cursor: (isOnChat && systemStatus.asking) ? "not-allowed" : "pointer"
+        }}
+      >
+        Ingest Docs
+      </button>
+      
+      {/* Only show chat button when documents are ready and no jobs are running */}
+      {canNavigateToChat && (
+        <button
+          onClick={() => onNavigate("/chat")}
+          style={{
+            ...styles.navButton,
+            background: isOnChat ? "#4a90e22a" : "transparent"
+          }}
+        >
+          Chat
+        </button>
+      )}
+
+      {systemStatus.has_running_jobs && (
+        <span style={styles.muted}>
+          Processing {systemStatus.running_jobs.length} job(s)...
+        </span>
+      )}
+      
+      {/* Show status message when chat is not available */}
+      {(!systemStatus.ready || systemStatus.docs_count === 0) && !systemStatus.has_running_jobs && (
+        <span style={styles.muted}>
+          Upload documents to enable chat
+        </span>
+      )}
+    </nav>
   );
 }
 
-export default function App() {
-  const [docs, setDocs] = useState([]);
-  const [docsLoading, setDocsLoading] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [uploadStatus, setUploadStatus] = useState("");
-  const [file, setFile] = useState(null);
+function AppContent() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  
+  const [systemStatus, setSystemStatus] = useState({
+    ready: false,
+    has_running_jobs: false,
+    running_jobs: [],
+    total_jobs: 0,
+    asking: false,
+    docs_count: 0,
+    total_docs: 0,
+    jobs: [],
+    llm_ready: false,
+  });
 
-  const [query, setQuery] = useState("");
-  const [asking, setAsking] = useState(false);
-  const [answer, setAnswer] = useState("");
-  const [sources, setSources] = useState([]);
-  const messagesRef = useRef(null);
+  const api = useMemo(() => ({
+    status: "/api/status",
+    warmup: "/api/warmup"
+  }), []);
 
-  const api = useMemo(() => {
-    // In local dev, Vite proxy forwards /api -> http://localhost:8000
-    // In Docker, nginx inside frontend container proxies /api -> http://rag-backend:8000
-    return {
-      ingest: "/api/ingest",
-      docs: "/api/docs",
-      ask: "/api/ask",
+  // Poll system status
+  useEffect(() => {
+    let interval;
+    
+    const checkStatus = async () => {
+      try {
+        const res = await fetch(api.status);
+        const data = await readJsonSafe(res);
+        if (!res.ok) {
+          throw new Error((data && (data.detail || data.error || data.raw)) || `GET /status ${res.status}`);
+        }
+
+        setSystemStatus(prev => ({
+          ...prev,
+          ready: !!data.ready,
+          has_running_jobs: !!data.has_running_jobs,
+          running_jobs: data.running_jobs || [],
+          total_jobs: data.total_jobs || 0,
+          docs_count: typeof data.docs_count === "number" ? data.docs_count : prev.docs_count,
+          total_docs: typeof data.total_docs === "number" ? data.total_docs : prev.total_docs,
+          jobs: Array.isArray(data.jobs) ? data.jobs : prev.jobs,
+          llm_ready: !!data.llm_ready,
+        }));
+      } catch (e) {
+        console.error("Failed to check system status:", e);
+        setSystemStatus(prev => ({
+          ...prev,
+          ready: false
+        }));
+      }
     };
-  }, []);
 
-  useEffect(() => {
-    void refreshDocs();
-  }, []);
+    // Initial check
+    checkStatus();
+    
+    // Poll every 2 seconds
+    interval = setInterval(checkStatus, 2000);
+    
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [api.status]);
 
-  useEffect(() => {
-    if (messagesRef.current) {
-      messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
-    }
-  }, [answer, sources]);
-
-  async function refreshDocs() {
-    setDocsLoading(true);
-    try {
-      const res = await fetch(api.docs);
-      const data = await readJsonSafe(res);
-      if (!res.ok) throw new Error((data && (data.detail || data.error || data.raw)) || `GET /docs ${res.status}`);
-      setDocs(Array.isArray(data) ? data : []);
-    } catch (e) {
-      console.error(e);
-      setDocs([]);
-    } finally {
-      setDocsLoading(false);
-    }
-  }
-
-  async function handleUpload() {
-    if (!file) {
-      setUploadStatus("Select a file first.");
+  const handleNavigate = (path) => {
+    // Prevent navigation to chat if not ready or jobs running
+    if (path === "/chat" && (!systemStatus.ready || systemStatus.has_running_jobs)) {
+      console.log("Navigation to chat blocked: not ready or jobs running");
       return;
     }
-    setUploading(true);
-    setUploadStatus("Uploading...");
-    try {
-      const form = new FormData();
-      form.append("file", file);
-      const res = await fetch(api.ingest, {
-        method: "POST",
-        body: form,
-      });
-      const data = await readJsonSafe(res);
-      if (!res.ok) throw new Error((data && (data.detail || data.error || data.raw)) || res.statusText);
-      if (data?.indexed) {
-        setUploadStatus(`Indexed: ${data.file || file.name}`);
-      } else {
-        setUploadStatus(`Uploaded (indexing may have failed): ${data.file || file.name}`);
-        if (data?.error) console.warn("Ingest error:", data.error);
-      }
-      setFile(null);
-      await refreshDocs();
-    } catch (e) {
-      console.error(e);
-      setUploadStatus(`Upload failed: ${e.message || String(e)}`);
-    } finally {
-      setUploading(false);
-      setTimeout(() => setUploadStatus(""), 4000);
+    
+    // Prevent navigation away from chat if asking
+    if (location.pathname === "/chat" && systemStatus.asking) {
+      console.log("Navigation blocked: currently asking");
+      return;
     }
-  }
+    
+    navigate(path);
+  };
 
-  async function handleAsk() {
-    const q = query.trim();
-    if (!q) return;
-    setAsking(true);
-    setAnswer("");
-    setSources([]);
-    try {
-      const res = await fetch(api.ask, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: q }),
-      });
-      const data = await readJsonSafe(res);
-      if (!res.ok) throw new Error((data && (data.detail || data.error || data.raw)) || res.statusText);
-      setAnswer(data?.answer || "");
-      setSources(Array.isArray(data?.sources) ? data.sources : []);
-    } catch (e) {
-      console.error(e);
-      setAnswer(`Error: ${e.message || String(e)}`);
-    } finally {
-      setAsking(false);
+  // Redirect to ingest if trying to access chat without ready docs
+  useEffect(() => {
+    if (
+      location.pathname === "/chat" &&
+      (!systemStatus.ready || systemStatus.has_running_jobs || systemStatus.docs_count === 0)
+    ) {
+      navigate("/ingest", { replace: true });
     }
-  }
+  }, [
+    location.pathname,
+    systemStatus.ready,
+    systemStatus.has_running_jobs,
+    systemStatus.docs_count,
+    navigate
+  ]);
+
+  const updateAskingStatus = (asking) => {
+    setSystemStatus(prev => ({ ...prev, asking }));
+  };
 
   return (
     <div>
@@ -137,118 +173,42 @@ export default function App() {
         <span style={styles.muted}>Upload documents, then ask questions</span>
       </header>
 
+      <NavigationBar 
+        systemStatus={systemStatus}
+        currentPath={location.pathname}
+        onNavigate={handleNavigate}
+      />
+
       <main style={styles.main}>
-        <div style={styles.stack}>
-          <Section
-            title="Upload / Ingest"
-            right={
-              <button onClick={handleUpload} disabled={uploading || !file} style={styles.button}>
-                {uploading ? "Ingesting..." : "Ingest"}
-              </button>
-            }
-          >
-            <div style={styles.row}>
-              <input
-                type="file"
-                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-                style={styles.input}
-              />
-            </div>
-            <div style={styles.muted}>{uploadStatus}</div>
-          </Section>
-
-          <Section
-            title="Documents"
-            right={
-              <button onClick={refreshDocs} disabled={docsLoading} style={styles.button}>
-                {docsLoading ? "Refreshing..." : "Refresh"}
-              </button>
-            }
-          >
-            <div style={{ ...styles.docs, ...(docs.length ? {} : styles.muted) }}>
-              {docs.length === 0 ? (
-                <div>No documents yet.</div>
+        <Routes>
+          <Route path="/ingest" element={<IngestPage systemStatus={systemStatus} />} />
+          <Route
+            path="/chat"
+            element={
+              systemStatus.ready && systemStatus.docs_count > 0 && !systemStatus.has_running_jobs ? (
+                <ChatPage
+                  onAskingChange={updateAskingStatus}
+                  warmupApi={api.warmup}
+                  llmReady={systemStatus.llm_ready}
+                />
               ) : (
-                <ul style={{ margin: 0, paddingLeft: 16 }}>
-                  {docs.map((d) => (
-                    <li key={d.name}>
-                      <span title={d.path}>
-                        {d.name} <span style={styles.muted}>({prettyBytes(d.size)})</span>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </Section>
-        </div>
-
-        <Section title="Chat">
-          <div style={styles.row}>
-            <input
-              type="text"
-              placeholder="Ask a question about your docs..."
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleAsk();
-              }}
-              style={{ ...styles.input, flex: 1 }}
-            />
-            <button onClick={handleAsk} disabled={asking || !query.trim()} style={styles.button}>
-              {asking ? "Asking..." : "Ask"}
-            </button>
-          </div>
-          <div ref={messagesRef} style={styles.messages}>
-            {!answer ? (
-              <div style={styles.muted}>No messages yet.</div>
-            ) : (
-              <div>
-                <div style={styles.answer}>{answer}</div>
-                {!!sources?.length && (
-                  <div style={{ ...styles.muted, marginTop: 8 }}>
-                    <div style={{ fontWeight: 600, marginBottom: 4 }}>Sources</div>
-                    <ol style={{ margin: 0, paddingLeft: 16 }}>
-                      {sources.map((s, i) => (
-                        <li key={i} style={{ marginBottom: 4 }}>
-                          <code style={styles.kbd}>{summarizeSource(s)}</code>
-                        </li>
-                      ))}
-                    </ol>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </Section>
+                <Navigate to="/ingest" replace />
+              )
+            }
+          />
+          <Route path="/" element={<Navigate to="/ingest" replace />} />
+        </Routes>
       </main>
     </div>
   );
 }
 
-function prettyBytes(n) {
-  if (n == null || isNaN(n)) return "-";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let idx = 0;
-  let val = n;
-  while (val >= 1024 && idx < units.length - 1) {
-    val /= 1024;
-    idx++;
-  }
-  return `${val.toFixed(val < 10 && idx > 0 ? 1 : 0)} ${units[idx]}`;
-}
-
-function summarizeSource(s) {
-  try {
-    if (!s) return "unknown";
-    if (typeof s === "string") return s;
-    if (s.path) return s.path;
-    if (s.name) return s.name;
-    if (s.file) return s.file;
-    return JSON.stringify(s);
-  } catch {
-    return "unknown";
-  }
+export default function App() {
+  return (
+    <Router>
+      <AppContent />
+    </Router>
+  );
 }
 
 const styles = {
@@ -260,54 +220,20 @@ const styles = {
     gap: 12,
   },
   main: {
-    display: "grid",
-    gap: 16,
-    gridTemplateColumns: "320px 1fr",
     padding: 16,
   },
-  card: {
-    border: "1px solid #4443",
-    borderRadius: 8,
-    padding: 12,
-    background: "transparent",
-  },
-  stack: { display: "grid", gap: 8 },
-  row: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" },
-  button: {
+  navButton: {
     font: "inherit",
-    padding: "8px 10px",
+    padding: "8px 12px",
     borderRadius: 6,
     border: "1px solid #4443",
     background: "transparent",
-    cursor: "pointer",
+    color: "#4a90e2",
+    textDecoration: "none",
   },
-  input: {
-    font: "inherit",
-    padding: "8px 10px",
-    borderRadius: 6,
-    border: "1px solid #4443",
-    background: "transparent",
-  },
-  docs: {
-    maxHeight: "40vh",
-    overflow: "auto",
-    border: "1px dashed #4443",
-    borderRadius: 6,
-    padding: 8,
-  },
-  messages: {
-    minHeight: 240,
-    maxHeight: "60vh",
-    overflow: "auto",
-    border: "1px dashed #4443",
-    borderRadius: 6,
-    padding: 8,
-    whiteSpace: "pre-wrap",
-  },
-  muted: { opacity: 0.7, fontSize: 12 },
-  answer: { padding: 8, borderRadius: 6, background: "#4a90e22a" },
-  kbd: {
-    fontFamily:
-      'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+  muted: { 
+    opacity: 0.7, 
+    fontSize: 12,
+    color: "#666"
   },
 };
