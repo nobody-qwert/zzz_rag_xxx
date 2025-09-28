@@ -313,6 +313,31 @@ def _load_rag() -> Any:
     return _rag_instance
 
 
+async def _ensure_rag_initialized(rag: Any) -> None:
+    """Ensure the provided RAG-Anything instance has LightRAG ready for use."""
+    if rag is None:
+        raise RuntimeError("RAG-Anything instance unavailable")
+
+    async def _run(fn: Callable[[], Any]) -> None:
+        result = await _maybe_await(fn())
+        if isinstance(result, dict):
+            if not result.get("success", True):
+                raise RuntimeError(result.get("error") or "LightRAG initialization failed")
+        elif isinstance(result, bool):
+            if not result:
+                raise RuntimeError("LightRAG initialization failed")
+
+    for attr in ("_ensure_lightrag_initialized", "ensure_lightrag_initialized"):
+        ensure_fn = getattr(rag, attr, None)
+        if ensure_fn is None:
+            continue
+        await _run(ensure_fn)
+        break
+    else:
+        if getattr(rag, "lightrag", None) is None:
+            raise RuntimeError("No LightRAG instance available and no initializer found")
+
+
 async def _maybe_await(result_or_coro: Any) -> Any:
     if asyncio.iscoroutine(result_or_coro):
         return await result_or_coro
@@ -643,7 +668,8 @@ async def warmup() -> Dict[str, Any]:
     """Send a simple warmup query to ensure LLM is loaded and ready."""
     global _llm_warm
     try:
-        _load_rag()
+        rag = _load_rag()
+        await _ensure_rag_initialized(rag)
         llm = _get_llm_model_func()
 
         await llm("Warm up for upcoming chat sessions.")
@@ -669,6 +695,7 @@ async def ask(req: AskRequest) -> AskResponse:
 
     try:
         rag = _load_rag()
+        await _ensure_rag_initialized(rag)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"RAG-Anything unavailable: {e}")
 
