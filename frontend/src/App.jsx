@@ -84,6 +84,7 @@ function AppContent() {
     total_docs: 0,
     jobs: [],
     llm_ready: false,
+    documents: [],
   });
 
   const api = useMemo(() => ({
@@ -113,6 +114,7 @@ function AppContent() {
           total_docs: typeof data.total_docs === "number" ? data.total_docs : prev.total_docs,
           jobs: Array.isArray(data.jobs) ? data.jobs : prev.jobs,
           llm_ready: !!data.llm_ready,
+          documents: Array.isArray(data.documents) ? data.documents : prev.documents,
         }));
       } catch (e) {
         console.error("Failed to check system status:", e);
@@ -206,6 +208,7 @@ function AppContent() {
                     onAskingChange={updateAskingStatus}
                     warmupApi={api.warmup}
                     llmReady={systemStatus.llm_ready}
+                    documents={systemStatus.documents}
                   />
                 ) : (
                   <Navigate to="/ingest" replace />

@@ -574,34 +574,35 @@ async def healthz() -> Dict[str, str]:
     return {"status": "ok"}
 
 
+def _format_document_row(doc: Dict[str, Any]) -> Dict[str, Any]:
+    stored_name = doc.get("stored_name") or doc.get("doc_hash") or "unknown"
+    file_path = DATA_DIR / stored_name
+    size = doc.get("size")
+    if size in (None, 0) and file_path.exists():
+        try:
+            size = file_path.stat().st_size
+        except OSError:
+            size = 0
+
+    return {
+        "name": doc.get("original_name") or stored_name,
+        "size": size or 0,
+        "status": doc.get("status") or "unknown",
+        "hash": doc.get("doc_hash"),
+        "stored_name": stored_name,
+        "path": f"/data/{stored_name}",
+        "last_ingested_at": doc.get("last_ingested_at"),
+        "error": doc.get("error"),
+        "updated_at": doc.get("updated_at"),
+        "created_at": doc.get("created_at"),
+    }
+
+
 @app.get("/docs")
 async def list_docs() -> List[Dict[str, Any]]:
     documents = await document_store.list_documents()
-    items: List[Dict[str, Any]] = []
-    for doc in documents:
-        stored_name = doc.get("stored_name") or doc.get("doc_hash") or "unknown"
-        file_path = DATA_DIR / stored_name
-        size = doc.get("size")
-        if size in (None, 0) and file_path.exists():
-            try:
-                size = file_path.stat().st_size
-            except OSError:
-                size = 0
-
-        items.append(
-            {
-                "name": doc.get("original_name") or stored_name,
-                "size": size or 0,
-                "status": doc.get("status") or "unknown",
-                "hash": doc.get("doc_hash"),
-                "stored_name": stored_name,
-                "path": f"/data/{stored_name}",
-                "last_ingested_at": doc.get("last_ingested_at"),
-                "error": doc.get("error"),
-                "updated_at": doc.get("updated_at"),
-                "created_at": doc.get("created_at"),
-            }
-        )
+    items = [_format_document_row(doc) for doc in documents]
+    logger.debug("List docs returning %d item(s)", len(items))
     return items
 
 
@@ -759,6 +760,8 @@ async def global_status() -> Dict[str, Any]:
     processed_docs = await document_store.count_documents(status="processed")
     total_docs = await document_store.count_documents()
     job_summaries = await document_store.list_jobs()
+    latest_docs_raw = await document_store.list_documents()
+    latest_docs = [_format_document_row(doc) for doc in latest_docs_raw]
 
     running_jobs = [
         job_id
@@ -784,6 +787,7 @@ async def global_status() -> Dict[str, Any]:
         "total_docs": total_docs,
         "jobs": job_summaries,
         "llm_ready": _llm_warm,
+        "documents": latest_docs,
     }
 
 

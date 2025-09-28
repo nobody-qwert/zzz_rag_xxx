@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 
 async function readJsonSafe(res) {
@@ -151,7 +151,7 @@ const styles = {
   },
 };
 
-export default function ChatPage({ onAskingChange, warmupApi, llmReady }) {
+export default function ChatPage({ onAskingChange, warmupApi, llmReady, documents = [] }) {
   const [query, setQuery] = useState("");
   const [asking, setAsking] = useState(false);
   const [answer, setAnswer] = useState("");
@@ -162,6 +162,9 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady }) {
   const [warmedUp, setWarmedUp] = useState(false);
   const warmupAttemptRef = useRef(false);
   const navigate = useNavigate();
+
+  const systemDocs = useMemo(() => (Array.isArray(documents) ? documents : []), [documents]);
+  const displayDocs = docs.length ? docs : systemDocs;
 
   const api = {
     docs: "/api/docs",
@@ -187,6 +190,16 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady }) {
   useEffect(() => {
     void refreshDocs();
   }, []);
+
+  useEffect(() => {
+    if (systemDocs.length > 0) {
+      setDocs((existing) => {
+        if (existing.length === 0) return systemDocs;
+        if (existing.length !== systemDocs.length) return systemDocs;
+        return existing;
+      });
+    }
+  }, [systemDocs]);
 
   // Communicate asking status to parent
   useEffect(() => {
@@ -341,14 +354,16 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady }) {
       <section style={styles.sideCard}>
         <div style={styles.sectionHeader}>
           <h2 style={{ ...styles.sectionTitle, fontSize: 18 }}>Ingested Documents</h2>
-          <span style={styles.badge}>{docs.length} file{docs.length === 1 ? "" : "s"}</span>
+          <span style={styles.badge}>
+            {displayDocs.length} file{displayDocs.length === 1 ? "" : "s"}
+          </span>
         </div>
-        <div style={{ ...styles.docs, ...(docs.length ? {} : styles.muted) }}>
-          {docs.length === 0 ? (
+        <div style={{ ...styles.docs, ...(displayDocs.length ? {} : styles.muted) }}>
+          {displayDocs.length === 0 ? (
             <div>No documents yet. Head back to ingestion to add some.</div>
           ) : (
             <ul style={{ margin: 0, paddingLeft: 0, listStyle: "none" }}>
-              {docs.map((d) => (
+              {displayDocs.map((d) => (
                 <li key={d.hash || d.stored_name || d.name} style={styles.listItem}>
                   <div title={d.path}>
                     <strong>{d.name}</strong>{" "}

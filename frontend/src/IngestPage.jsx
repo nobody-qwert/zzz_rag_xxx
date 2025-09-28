@@ -184,6 +184,20 @@ export default function IngestPage({ systemStatus = {} }) {
     void refreshDocs();
   }, [refreshDocs]);
 
+  const systemDocs = useMemo(() => (Array.isArray(systemStatus.documents) ? systemStatus.documents : []), [systemStatus.documents]);
+
+  const displayDocs = docs.length ? docs : systemDocs;
+
+  useEffect(() => {
+    if (systemDocs.length > 0) {
+      setDocs((existing) => {
+        if (existing.length === 0) return systemDocs;
+        if (existing.length !== systemDocs.length) return systemDocs;
+        return existing;
+      });
+    }
+  }, [systemDocs]);
+
   const docsCountRef = useRef(systemStatus.docs_count || 0);
 
   useEffect(() => {
@@ -371,7 +385,7 @@ export default function IngestPage({ systemStatus = {} }) {
           <div>
             <h3 style={styles.sectionTitle}>Document Library</h3>
             <span style={styles.muted}>
-              {`${systemStatus.docs_count || 0} ready / ${systemStatus.total_docs || docs.length}`}
+              {`${systemStatus.docs_count || 0} ready / ${systemStatus.total_docs || displayDocs.length}`}
             </span>
           </div>
           <button
@@ -386,12 +400,12 @@ export default function IngestPage({ systemStatus = {} }) {
             {docsLoading ? "Refreshing…" : "Refresh"}
           </button>
         </div>
-        <div style={{ ...styles.docs, ...(docs.length ? {} : styles.muted) }}>
-          {docs.length === 0 ? (
+        <div style={{ ...styles.docs, ...(displayDocs.length ? {} : styles.muted) }}>
+          {displayDocs.length === 0 ? (
             <div>No documents yet. Upload files to build your knowledge base.</div>
           ) : (
             <ul style={{ margin: 0, paddingLeft: 0, listStyle: "none" }}>
-              {docs.map((d) => (
+              {displayDocs.map((d) => (
                 <li key={d.hash || d.stored_name || d.name} style={styles.listItem}>
                   <div title={d.path}>
                     <strong>{d.name}</strong>{" "}
