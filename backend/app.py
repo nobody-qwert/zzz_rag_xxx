@@ -2,6 +2,8 @@ import os
 import json
 import hashlib
 import asyncio
+import logging
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -38,6 +40,9 @@ DOC_STORE_PATH = Path(os.environ.get("DOC_STORE_PATH") or (DATA_DIR / "rag_meta.
 document_store = DocumentStore(DOC_STORE_PATH)
 
 _llm_warm: bool = False
+
+
+logger = logging.getLogger(__name__)
 
 
 def _sanitize_doc_status_artifacts() -> None:
@@ -394,8 +399,24 @@ async def _process_job(job_id: str, path: Path, doc_hash: str, display_name: str
     """
     Background task that processes a document and updates the jobs dict.
     """
+    start_time = time.perf_counter()
+    total_steps = 5
+
+    def _log(step: int, message: str) -> None:
+        elapsed = time.perf_counter() - start_time
+        logger.info(
+            "Ingest %s (%s) step %d/%d: %s [%.2fs elapsed]",
+            doc_hash[:8],
+            display_name,
+            step,
+            total_steps,
+            message,
+            elapsed,
+        )
+
     try:
         await document_store.mark_job_started(job_id)
+        _log(1, "Job marked as started")
     except Exception:
         # Non-fatal: continue best-effort even if persistence update fails.
         pass
@@ -405,12 +426,15 @@ async def _process_job(job_id: str, path: Path, doc_hash: str, display_name: str
 
     try:
         await document_store.update_document_status(doc_hash, "processing")
+        _log(2, "Document status set to processing")
     except Exception:
         pass
 
     try:
         _purge_doc_status_entry(doc_hash)
+        _log(3, "Cleared cached doc status metadata")
         rag = _load_rag()
+        _log(4, "Loaded RAG-Anything pipeline; starting document parsing/index build")
         # Prefer instance method if available
         if hasattr(rag, "process_document_complete"):
             await rag.process_document_complete(
@@ -433,15 +457,18 @@ async def _process_job(job_id: str, path: Path, doc_hash: str, display_name: str
         jobs[job_id]["status"] = "done"
         await document_store.mark_document_processed(doc_hash)
         await document_store.finish_job(job_id, "done")
+        _log(5, "Document ingestion finished and metadata persisted")
     except asyncio.CancelledError:
         jobs[job_id]["status"] = "cancelled"
         await document_store.finish_job(job_id, "cancelled", error="Processing cancelled")
         await document_store.update_document_status(doc_hash, "error", error="Processing cancelled")
+        _log(total_steps, "Document ingestion cancelled")
         raise
     except Exception as e:
         jobs[job_id]["status"] = f"error: {e}"
         await document_store.finish_job(job_id, "error", error=str(e))
         await document_store.update_document_status(doc_hash, "error", error=str(e))
+        _log(total_steps, f"Document ingestion failed: {e}")
         raise
 
 
