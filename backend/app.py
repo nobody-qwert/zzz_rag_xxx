@@ -45,6 +45,86 @@ _llm_warm: bool = False
 logger = logging.getLogger(__name__)
 
 
+async def _ingest_pdf_with_pymupdf(
+    rag: Any,
+    path: Path,
+    display_name: str,
+    doc_hash: str,
+) -> None:
+    """Rapid PDF text ingestion using PyMuPDF, falling back to LightRAG insert."""
+
+    try:
+        import fitz  # type: ignore
+    except ImportError as exc:  # pragma: no cover - handled by fallback
+        raise RuntimeError(
+            "PyMuPDF is not installed; add 'PyMuPDF' to backend requirements."
+        ) from exc
+
+    def _extract_pages() -> List[Dict[str, Any]]:
+        doc = fitz.open(path)
+        try:
+            items: List[Dict[str, Any]] = []
+            for page_index, page in enumerate(doc):
+                text = page.get_text("text")
+                if text and text.strip():
+                    items.append(
+                        {
+                            "type": "text",
+                            "page_idx": page_index,
+                            "page_number": page_index + 1,
+                            "text": text,
+                        }
+                    )
+            return items
+        finally:
+            doc.close()
+
+    content_items = await asyncio.to_thread(_extract_pages)
+    if not content_items:
+        raise ValueError("PyMuPDF extracted no textual content from the PDF")
+
+    # Combine content similar to raganything.utils.separate_content
+    combined_text = "\n\n".join(item["text"].strip() for item in content_items if item["text"].strip())
+    if not combined_text:
+        raise ValueError("PyMuPDF produced empty text after cleanup")
+
+    try:
+        from raganything.utils import insert_text_content  # type: ignore
+    except Exception as exc:  # pragma: no cover - should not happen in runtime image
+        raise RuntimeError(f"Failed to import raganything utilities: {exc}") from exc
+
+    await insert_text_content(
+        rag.lightrag,
+        input=combined_text,
+        file_paths=display_name,
+        ids=doc_hash,
+    )
+
+    doc_status_accessor = getattr(rag, "lightrag", None)
+    if doc_status_accessor is None:
+        return
+
+    doc_status = getattr(doc_status_accessor, "doc_status", None)
+    if doc_status is None:
+        return
+
+    try:
+        current = await doc_status.get_by_id(doc_hash)
+        payload: Dict[str, Any] = {
+            "doc_id": doc_hash,
+            "status": "PROCESSED",
+            "text_processed": True,
+            "multimodal_processed": True,
+        }
+        if current:
+            payload.update({k: v for k, v in current.items() if k not in payload})
+        await doc_status.upsert(payload)
+        if hasattr(doc_status, "index_done_callback"):
+            await doc_status.index_done_callback()
+    except Exception:
+        logger.exception("Failed to update LightRAG doc_status for %s", doc_hash)
+
+
 def _sanitize_doc_status_artifacts() -> None:
     """Remove incompatible fields from LightRAG doc status cache files."""
     try:
@@ -400,7 +480,7 @@ async def _process_job(job_id: str, path: Path, doc_hash: str, display_name: str
     Background task that processes a document and updates the jobs dict.
     """
     start_time = time.perf_counter()
-    total_steps = 5
+    total_steps = 6
 
     def _log(step: int, message: str) -> None:
         elapsed = time.perf_counter() - start_time
@@ -434,30 +514,47 @@ async def _process_job(job_id: str, path: Path, doc_hash: str, display_name: str
         _purge_doc_status_entry(doc_hash)
         _log(3, "Cleared cached doc status metadata")
         rag = _load_rag()
-        _log(4, "Loaded RAG-Anything pipeline; starting document parsing/index build")
-        # Prefer instance method if available
-        if hasattr(rag, "process_document_complete"):
-            await rag.process_document_complete(
-                str(path),
-                output_dir=str(INDEX_DIR),
-                parse_method="auto",
-                doc_id=doc_hash,
-            )
-        else:
-            # Fallback to module-level function
-            if hasattr(_rag_module, "process_document_complete"):
-                result = _rag_module.process_document_complete(  # type: ignore
+        await _ensure_rag_initialized(rag)
+        _log(4, "Loaded RAG-Anything pipeline")
+
+        used_pymupdf = False
+        if path.suffix.lower() == ".pdf":
+            try:
+                _log(5, "Using PyMuPDF fast-path for PDF text ingestion")
+                await _ingest_pdf_with_pymupdf(rag, path, display_name, doc_hash)
+                used_pymupdf = True
+            except Exception as exc:
+                logger.exception(
+                    "PyMuPDF ingestion failed for %s; falling back to RagAnything pipeline (%s)",
+                    display_name,
+                    exc,
+                )
+
+        if not used_pymupdf:
+            _log(5, "Delegating document to RagAnything parser pipeline")
+            # Prefer instance method if available
+            if hasattr(rag, "process_document_complete"):
+                await rag.process_document_complete(
                     str(path),
                     output_dir=str(INDEX_DIR),
                     parse_method="auto",
                     doc_id=doc_hash,
                 )
-                if asyncio.iscoroutine(result):
-                    await result
+            else:
+                # Fallback to module-level function
+                if hasattr(_rag_module, "process_document_complete"):
+                    result = _rag_module.process_document_complete(  # type: ignore
+                        str(path),
+                        output_dir=str(INDEX_DIR),
+                        parse_method="auto",
+                        doc_id=doc_hash,
+                    )
+                    if asyncio.iscoroutine(result):
+                        await result
         jobs[job_id]["status"] = "done"
         await document_store.mark_document_processed(doc_hash)
         await document_store.finish_job(job_id, "done")
-        _log(5, "Document ingestion finished and metadata persisted")
+        _log(6, "Document ingestion finished and metadata persisted")
     except asyncio.CancelledError:
         jobs[job_id]["status"] = "cancelled"
         await document_store.finish_job(job_id, "cancelled", error="Processing cancelled")
