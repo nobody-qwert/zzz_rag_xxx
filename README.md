@@ -1,142 +1,244 @@
-# RAG-Anything + Remote LM Studio + Frontend (Docker Compose)
+# RAG-Anything + Remote LM Studio Integration
 
-This project runs a complete RAG app in Docker and connects to a remote LM Studio server via its OpenAI-compatible API. A minimal React frontend provides:
-- Upload/ingest of documents
-- List of ingested docs
-- Chat to ask questions against your indexed data
+A complete RAG (Retrieval-Augmented Generation) application that integrates RAG-Anything with LM Studio for document processing and intelligent querying. Features a React frontend and FastAPI backend, all containerized with Docker Compose.
 
-Architecture:
-- Remote LLM (LM Studio) on another machine, exposing http://192.168.88.11:1234/v1 (adjust IP/port)
-- rag-backend (FastAPI) in Docker uses RAG-Anything for ingest/index/query
-- frontend (Vite/React -> static Nginx) calls backend. In production, Nginx proxies /api → rag-backend:8000
+## ✨ Features
 
-Note: No Ollama stack is required here.
+- **Document Processing**: Upload and process PDFs, images, Office documents, and more using RAG-Anything with MinerU parser
+- **Intelligent Querying**: Ask questions about your documents using LightRAG's advanced retrieval system
+- **LM Studio Integration**: Connect to remote LM Studio for both LLM and embedding models via OpenAI-compatible API
+- **Modern Frontend**: Clean React interface for document upload and chat-based querying
+- **Containerized**: Full Docker Compose setup for easy deployment
+- **Persistent Storage**: Documents and indices survive container restarts
 
---------------------------------------------------------------------------------
+## 🏗️ Architecture
 
-Prerequisites
-- Windows 11 + WSL2 recommended for running docker compose
-- Docker Desktop (WSL2 engine enabled)
-- Remote LM Studio reachable from your Docker host
-  - LM Studio must bind to 0.0.0.0 and allow inbound connections on its server port
-  - In LM Studio, enable the “OpenAI compatible server” and ensure the base URL uses the /v1 suffix
+- **Remote LLM**: LM Studio server (e.g., `http://192.168.88.11:1234/v1`)
+- **Backend**: FastAPI with RAG-Anything integration for document processing and querying
+- **Frontend**: React/Vite app served by Nginx with API proxy
+- **Storage**: Persistent volumes for uploaded documents and search indices
 
---------------------------------------------------------------------------------
+## 📋 Prerequisites
 
-Project Layout
-- backend/        FastAPI app (RAG-Anything integration)
-- frontend/       React/Vite app (built and served by Nginx in production)
-- data/           User-uploaded raw files (mounted into backend)
-- indices/        Persistent indices/artifacts (mounted into backend)
-- docker-compose.yml
-- .env.example    Template for environment variables (copy to .env)
+- **Docker Desktop** with WSL2 engine (Windows 11 recommended)
+- **Remote LM Studio** server accessible from your Docker host
+  - Must bind to `0.0.0.0` (not just localhost)
+  - OpenAI-compatible server enabled with `/v1` endpoint
+  - Both LLM and embedding models loaded (e.g., `text-embedding-nomic-embed-text-v1.5`)
 
---------------------------------------------------------------------------------
+## 🚀 Quick Start
 
-Environment Setup
-1) Copy the example env and edit values:
-   cp .env.example .env
+### 1. Environment Setup
 
-   Required values:
-   - OPENAI_BASE_URL=http://192.168.88.11:1234/v1
-   - OPENAI_API_KEY=any-non-empty-string
-   - BACKEND_PORT=8000
-   - FRONTEND_PORT=5173
-   - DATA_DIR=/data
-   - INDEX_DIR=/indices
+Copy and configure environment variables:
 
-2) Ensure LM Studio (remote) is running and reachable from this machine:
-   - Bind to 0.0.0.0
-   - OpenAI-compatible server URL must include /v1
-   - Make sure firewall rules allow inbound traffic on the port (e.g., 1234)
+```bash
+cp .env.example .env
+```
 
---------------------------------------------------------------------------------
+Edit `.env` with your LM Studio details:
 
-Run with Docker Compose
-From the project root:
-   docker compose up --build
+```env
+# Remote LM Studio (OpenAI-compatible). IMPORTANT: include /v1 suffix
+OPENAI_BASE_URL=http://192.168.88.11:1234/v1
+OPENAI_API_KEY=lmstudio-or-token
+# Model id as shown by LM Studio (/v1/models). Must match a loaded model.
+LLM_MODEL=Your-Model-Id-From-LM-Studio
+# Embedding model for RAG-Anything (must be available in LM Studio)
+EMBEDDING_MODEL=text-embedding-nomic-embed-text-v1.5
 
-- Backend will be available on http://localhost:8000
-- Frontend will be available on http://localhost:5173
+# Backend paths (mounted into the backend container)
+DATA_DIR=/data
+INDEX_DIR=/indices
 
-In production, the frontend’s Nginx proxies /api → rag-backend:8000. In local dev (Vite), the Vite dev server proxies /api → http://localhost:8000.
+# Backend server
+BACKEND_PORT=8000
 
---------------------------------------------------------------------------------
+# Frontend server (host port exposed by docker compose)
+FRONTEND_PORT=5173
+```
 
-Usage (Frontend)
-- Open http://localhost:5173
-- Upload a document; it will appear in the Docs list
-- Ask questions in the Chat panel
+### 2. Verify LM Studio Connection
 
---------------------------------------------------------------------------------
+Test that your LM Studio server is accessible:
 
-API Endpoints (Backend)
-Base URL: http://localhost:8000
+```bash
+curl http://192.168.88.11:1234/v1/models
+```
 
-- POST /ingest
-  - multipart/form-data with field: file
-  - Example:
-    curl -F "file=@/path/to/file.pdf" http://localhost:8000/ingest
+You should see a list of loaded models including both your LLM and embedding model.
 
-- GET /docs
-  - Lists ingested documents
-  - Example:
-    curl http://localhost:8000/docs
+### 3. Launch the Application
 
-- POST /ask
-  - JSON body: { "query": "..." }
-  - Example:
-    curl -H "Content-Type: application/json" -d '{"query":"What is in the docs?"}' http://localhost:8000/ask
+```bash
+docker compose up --build
+```
 
-- GET /healthz
-  - Simple health check
+The application will be available at:
+- **Frontend**: http://localhost:5173
+- **Backend API**: http://localhost:8000
+- **API Documentation**: http://localhost:8000/docs
 
---------------------------------------------------------------------------------
+## 📖 Usage
 
-Local Development (optional)
-You can run services outside Docker if desired.
+### Web Interface
 
-Backend:
-- Install deps: pip install -r backend/requirements.txt
-- Run: uvicorn backend.app:app --reload --host 0.0.0.0 --port 8000
-- Ensure env variables are set in your shell (OPENAI_BASE_URL, OPENAI_API_KEY, DATA_DIR, INDEX_DIR)
+1. **Upload Documents**: 
+   - Navigate to http://localhost:5173
+   - Use the upload interface to add PDFs, images, or Office documents
+   - Documents are processed automatically using RAG-Anything + MinerU
 
-Frontend:
-- cd frontend
-- npm install
-- npm run dev
-- Vite dev server at http://localhost:5173 will proxy /api → http://localhost:8000
+2. **Query Documents**:
+   - Use the chat interface to ask questions about your uploaded documents
+   - The system uses LightRAG's hybrid search (vector + knowledge graph) for intelligent responses
 
---------------------------------------------------------------------------------
+### API Endpoints
 
-Persistence
-- data/ and indices/ are bind-mounted into the backend container.
-- Files survive container rebuilds.
+#### Document Ingestion
+```bash
+curl -F "file=@document.pdf" http://localhost:8000/ingest
+```
 
---------------------------------------------------------------------------------
+#### List Documents
+```bash
+curl http://localhost:8000/docs
+```
 
-Troubleshooting
-- 404/Network errors from LM Studio:
-  - Verify OPENAI_BASE_URL ends with /v1
-  - Check the server is bound to 0.0.0.0 and is reachable (e.g., curl http://192.168.88.11:1234/v1/models)
-  - Ensure firewall rules allow inbound connections and no VPN or routing rules block the path
+#### Query Documents
+```bash
+curl -H "Content-Type: application/json" \
+     -d '{"query":"What are the key concepts in the document?"}' \
+     http://localhost:8000/ask
+```
 
-- Ingestion fails for certain formats:
-  - Some Office/PDF/image parsers may require extra system packages. The current backend image is python:3.10-slim + raganything[all].
-  - If parsing fails for large/complex docs, consider extending the backend image with additional packages (e.g., poppler, tesseract, libreoffice) per RAG-Anything’s docs.
+#### Health Check
+```bash
+curl http://localhost:8000/healthz
+```
 
-- CORS issues in dev:
-  - Vite dev proxy routes /api to http://localhost:8000
-  - Backend enables CORS for http://localhost:5173 by default
+## 🔧 Configuration
 
---------------------------------------------------------------------------------
+### Supported File Types
 
-Notes
-- Do not commit secrets; keep .env locally. Update .env.example only for defaults.
-- To change models, switch the model inside LM Studio; the backend stays the same.
-- For performance, consider batching ingestion and prebuilding indices.
+RAG-Anything with MinerU parser supports:
+- **PDFs**: Direct parsing with OCR fallback
+- **Images**: PNG, JPEG, BMP, TIFF, GIF, WebP
+- **Office Documents**: DOC, DOCX, PPT, PPTX, XLS, XLSX (via LibreOffice conversion)
+- **Text Files**: TXT, MD (via ReportLab conversion)
 
---------------------------------------------------------------------------------
+### LM Studio Models
 
-License
-- MIT or your preferred license.
+Recommended models for optimal performance:
+- **LLM**: Any chat model loaded in LM Studio
+- **Embeddings**: `text-embedding-nomic-embed-text-v1.5` (768 dimensions)
+- **Alternative Embeddings**: `text-embedding-3-small` (1536d) or `text-embedding-3-large` (3072d)
+
+### Processing Features
+
+- **Multimodal Content**: Automatic processing of images, tables, and equations
+- **Context-Aware**: Surrounding content extraction for better understanding
+- **Caching**: Parse results cached for faster reprocessing
+- **Knowledge Graph**: LightRAG builds entity-relationship graphs for enhanced retrieval
+
+## 🛠️ Development
+
+### Local Development (Optional)
+
+**Backend**:
+```bash
+cd backend
+pip install -r requirements.txt
+uvicorn app:app --reload --host 0.0.0.0 --port 8000
+```
+
+**Frontend**:
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+### Project Structure
+
+```
+├── backend/              # FastAPI application
+│   ├── app.py           # Main application with RAG-Anything integration
+│   ├── requirements.txt # Python dependencies
+│   └── Dockerfile       # Backend container
+├── frontend/            # React application
+│   ├── src/            # React components
+│   ├── package.json    # Node.js dependencies
+│   └── Dockerfile      # Frontend container
+├── data/               # Uploaded documents (persistent)
+├── indices/            # Search indices (persistent)
+├── docker-compose.yml  # Container orchestration
+└── .env.example       # Environment template
+```
+
+## 🔍 Troubleshooting
+
+### Connection Issues
+
+**LM Studio not reachable**:
+- Verify `OPENAI_BASE_URL` includes `/v1` suffix
+- Ensure LM Studio binds to `0.0.0.0`, not just `localhost`
+- Check firewall rules allow inbound connections
+- Test with: `curl http://your-lm-studio-ip:1234/v1/models`
+
+**Model not found**:
+- Verify `LLM_MODEL` matches exactly what's shown in `/v1/models`
+- Ensure both LLM and embedding models are loaded in LM Studio
+- Check model names are case-sensitive
+
+### Processing Issues
+
+**Document parsing fails**:
+- Large/complex documents may require more memory
+- Some formats may need additional system packages
+- Check backend logs for specific parser errors
+
+**Slow processing**:
+- Consider using smaller models for faster processing
+- Adjust `max_concurrent_files` in RAG-Anything config
+- Monitor system resources during processing
+
+### Query Issues
+
+**No results returned**:
+- Ensure documents were successfully ingested (check `/docs` endpoint)
+- Try different query phrasings
+- Check if embedding model is properly loaded
+
+**Poor quality responses**:
+- Experiment with different LLM models
+- Adjust query modes (local, global, hybrid)
+- Consider reranking models for better relevance
+
+## 📊 Performance Tips
+
+- **Memory**: Allocate sufficient RAM for LM Studio models
+- **Storage**: Use SSD storage for faster index operations
+- **Network**: Ensure stable, low-latency connection to LM Studio
+- **Batching**: Process multiple documents together when possible
+
+## 🔒 Security Notes
+
+- Keep `.env` file secure and never commit it to version control
+- Use strong API keys in production environments
+- Consider network security when exposing LM Studio server
+- Regularly update dependencies for security patches
+
+## 📄 License
+
+MIT License - see LICENSE file for details.
+
+## 🤝 Contributing
+
+Contributions welcome! Please read the contributing guidelines and submit pull requests for any improvements.
+
+## 📞 Support
+
+For issues related to:
+- **RAG-Anything**: Check the [RAG-Anything documentation](https://github.com/aigc-apps/RAG-Anything)
+- **LightRAG**: See [LightRAG repository](https://github.com/HKUDS/LightRAG)
+- **LM Studio**: Visit [LM Studio documentation](https://lmstudio.ai/docs)
