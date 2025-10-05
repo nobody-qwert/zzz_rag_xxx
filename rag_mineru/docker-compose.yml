@@ -1,0 +1,50 @@
+services:
+  rag-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        PREFETCH_MODELS: ${PREFETCH_MODELS:-0}
+    env_file: .env
+    environment:
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      LLM_MODEL: ${LLM_MODEL}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL}
+      DATA_DIR: ${DATA_DIR:-/data}
+      INDEX_DIR: ${INDEX_DIR:-/indices}
+      MINERU_DEVICE_MODE: ${MINERU_DEVICE_MODE:-auto}
+      # Cache locations (persisted via indices volume)
+      HF_HOME: /indices/hf_cache
+      TRANSFORMERS_CACHE: /indices/hf_cache
+      ULTRALYTICS_HOME: /indices/ultralytics
+      # Parser controls
+      PARSER_MODE: ${PARSER_MODE:-mineru}
+      MIN_PYMUPDF_CHARS_PER_PAGE: ${MIN_PYMUPDF_CHARS_PER_PAGE:-300}
+      MINERU_PARSE_METHOD: ${MINERU_PARSE_METHOD:-auto}
+      MINERU_LANG: ${MINERU_LANG:-en}
+      MINERU_TABLE_ENABLE: ${MINERU_TABLE_ENABLE:-true}
+      MINERU_FORMULA_ENABLE: ${MINERU_FORMULA_ENABLE:-true}
+      MINERU_WARMUP_ON_STARTUP: ${MINERU_WARMUP_ON_STARTUP:-false}
+    # Requires NVIDIA Container Toolkit installed on host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - ./data:${DATA_DIR:-/data}
+      - ./indices:${INDEX_DIR:-/indices}
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    depends_on:
+      - rag-backend
+    ports:
+      - "${FRONTEND_PORT:-5173}:80"

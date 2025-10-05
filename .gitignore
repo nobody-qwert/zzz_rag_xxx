@@ -6,6 +6,8 @@ Thumbs.db
 *.log
 *.tmp
 .env
+**/.env
+**/.env.local
 
 # Python
 __pycache__/
@@ -40,3 +42,18 @@ data/*
 indices/*
 !indices/.gitkeep
 sample_RAG-anything/
+
+# RAG MinerU app artifacts
+rag_mineru/data/*
+!rag_mineru/data/.gitkeep
+rag_mineru/indices/*
+!rag_mineru/indices/.gitkeep
+rag_mineru/frontend/node_modules/
+rag_mineru/frontend/dist/
+
+# Misc caches
+**/.ipynb_checkpoints/
+.python-version
+.ruff_cache/
+.cache/
+rag_mineru/models/
