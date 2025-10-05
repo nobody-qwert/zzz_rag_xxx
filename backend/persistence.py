@@ -115,10 +115,26 @@ class DocumentStore:
                     """
                 )
 
+                await conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS performance_metrics (
+                        doc_hash TEXT PRIMARY KEY,
+                        pymupdf_time_sec REAL,
+                        mineru_time_sec REAL,
+                        chunking_time_sec REAL,
+                        embedding_time_sec REAL,
+                        total_time_sec REAL,
+                        created_at TEXT NOT NULL,
+                        FOREIGN KEY(doc_hash) REFERENCES documents(doc_hash) ON DELETE CASCADE
+                    )
+                    """
+                )
+
                 await conn.execute("CREATE INDEX IF NOT EXISTS idx_docs_status ON documents(status)")
                 await conn.execute("CREATE INDEX IF NOT EXISTS idx_ext_doc ON extractions(doc_hash)")
                 await conn.execute("CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(doc_hash)")
                 await conn.execute("CREATE INDEX IF NOT EXISTS idx_emb_doc ON embeddings(doc_hash)")
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_perf_doc ON performance_metrics(doc_hash)")
 
                 await conn.commit()
             finally:
@@ -401,3 +417,57 @@ class DocumentStore:
         finally:
             await conn.close()
 
+    # Performance Metrics
+    async def save_performance_metrics(
+        self,
+        doc_hash: str,
+        *,
+        pymupdf_time_sec: Optional[float] = None,
+        mineru_time_sec: Optional[float] = None,
+        chunking_time_sec: Optional[float] = None,
+        embedding_time_sec: Optional[float] = None,
+        total_time_sec: Optional[float] = None,
+    ) -> None:
+        conn = await self._conn()
+        try:
+            await conn.execute(
+                """
+                INSERT INTO performance_metrics (
+                    doc_hash, pymupdf_time_sec, mineru_time_sec, chunking_time_sec,
+                    embedding_time_sec, total_time_sec, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(doc_hash) DO UPDATE SET
+                    pymupdf_time_sec=excluded.pymupdf_time_sec,
+                    mineru_time_sec=excluded.mineru_time_sec,
+                    chunking_time_sec=excluded.chunking_time_sec,
+                    embedding_time_sec=excluded.embedding_time_sec,
+                    total_time_sec=excluded.total_time_sec,
+                    created_at=excluded.created_at
+                """,
+                (
+                    doc_hash,
+                    pymupdf_time_sec,
+                    mineru_time_sec,
+                    chunking_time_sec,
+                    embedding_time_sec,
+                    total_time_sec,
+                    _utc_now(),
+                ),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+    async def get_performance_metrics(self, doc_hash: str) -> Optional[Dict[str, Any]]:
+        conn = await self._conn()
+        try:
+            cur = await conn.execute(
+                "SELECT * FROM performance_metrics WHERE doc_hash=?",
+                (doc_hash,),
+            )
+            row = await cur.fetchone()
+            await cur.close()
+            return dict(row) if row else None
+        finally:
+            await conn.close()

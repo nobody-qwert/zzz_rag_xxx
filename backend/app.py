@@ -100,16 +100,27 @@ async def _compute_embeddings_for_chunks(chunks: List[Dict[str, Any]], client: E
 
 
 async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name: str) -> None:
+    import time
+    
     async def update(status: str, *, error: Optional[str] = None) -> None:
         jobs[job_id]["status"] = status if not error else f"error: {error}"
         await document_store.update_document_status(doc_hash, status if not error else "error", error=error)
+
+    # Performance tracking
+    start_total = time.perf_counter()
+    pymupdf_time = None
+    mineru_time = None
+    chunking_time = None
+    embedding_time = None
 
     try:
         await document_store.mark_job_started(job_id)
         await document_store.update_document_status(doc_hash, "processing")
 
         # 1) PyMuPDF fast extraction
+        start_pymupdf = time.perf_counter()
         py_out = await _extract_pymupdf(doc_path)
+        pymupdf_time = time.perf_counter() - start_pymupdf
         await document_store.upsert_extraction(doc_hash, "pymupdf", text=py_out["text"], meta_json=json.dumps({"pages": py_out.get("pages", 0)}))
 
         # Decide whether to run MinerU based on PARSER_MODE
@@ -125,6 +136,7 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
 
         if use_mineru:
             # 2) MinerU rich extraction (GPU when available)
+            start_mineru = time.perf_counter()
             mineru_dir = INDEX_DIR / f"mineru/{doc_hash}"
             mineru_res = await asyncio.to_thread(
                 run_mineru,
@@ -135,6 +147,7 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
                 table_enable=(MINERU_TABLE_ENABLE in {"1", "true", "yes", "on"}),
                 formula_enable=(MINERU_FORMULA_ENABLE in {"1", "true", "yes", "on"}),
             )
+            mineru_time = time.perf_counter() - start_mineru
             await document_store.upsert_extraction(doc_hash, "mineru", text=mineru_res.text, meta_json=json.dumps(mineru_res.metadata))
             chosen_text = mineru_res.text
             chosen_meta = {"parser_used": "mineru"}
@@ -145,13 +158,16 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
             await document_store.upsert_extraction(doc_hash, "mineru", text=chosen_text, meta_json=json.dumps(chosen_meta))
 
         # 3) Chunk from MinerU text
+        start_chunking = time.perf_counter()
         size = int(os.environ.get("CHUNK_SIZE", "500") or 500)
         overlap = int(os.environ.get("CHUNK_OVERLAP", "100") or 100)
         chunks = sliding_token_chunks(chosen_text, size=size, overlap=overlap)
         chunk_rows = [(c.chunk_id, c.order_index, c.text, c.token_count) for c in chunks]
         await document_store.replace_chunks(doc_hash, "mineru", chunk_rows)
+        chunking_time = time.perf_counter() - start_chunking
 
         # 4) Embeddings (LM Studio)
+        start_embedding = time.perf_counter()
         emb_client = EmbeddingClient()
         rows = await _compute_embeddings_for_chunks(
             [
@@ -162,6 +178,19 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
             doc_hash,
         )
         await document_store.replace_embeddings(rows)
+        embedding_time = time.perf_counter() - start_embedding
+
+        total_time = time.perf_counter() - start_total
+
+        # Save performance metrics
+        await document_store.save_performance_metrics(
+            doc_hash,
+            pymupdf_time_sec=pymupdf_time,
+            mineru_time_sec=mineru_time,
+            chunking_time_sec=chunking_time,
+            embedding_time_sec=embedding_time,
+            total_time_sec=total_time,
+        )
 
         await document_store.mark_document_processed(doc_hash)
         await document_store.finish_job(job_id, "done")
@@ -276,7 +305,15 @@ async def system_status() -> Dict[str, Any]:
 @app.get("/documents")
 async def list_docs() -> List[Dict[str, Any]]:
     docs = await document_store.list_documents()
-    return [_format_document_row(d) for d in docs]
+    result = []
+    for d in docs:
+        doc_data = _format_document_row(d)
+        # Add performance metrics if available
+        if d.get("doc_hash"):
+            metrics = await document_store.get_performance_metrics(d["doc_hash"])
+            doc_data["performance"] = metrics
+        result.append(doc_data)
+    return result
 
 
 @app.post("/ingest")

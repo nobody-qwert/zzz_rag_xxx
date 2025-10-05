@@ -62,6 +62,7 @@ export default function IngestPage({ systemStatus = {} }) {
   const [previewInfo, setPreviewInfo] = useState(null);
   const [previewMaxChars, setPreviewMaxChars] = useState(2000);
   const [parser, setParser] = useState("mineru");
+  const [expandedPerf, setExpandedPerf] = useState(new Set());
 
   const refreshDocs = useCallback(async () => {
     setDocsLoading(true);
@@ -212,18 +213,76 @@ export default function IngestPage({ systemStatus = {} }) {
             <div>No documents yet. Upload files to build your knowledge base.</div>
           ) : (
             <ul style={{ margin: 0, paddingLeft: 0, listStyle: "none" }}>
-              {displayDocs.map((d) => (
-                <li key={d.hash || d.stored_name || d.name} style={styles.listItem}>
-                  <div title={d.path}>
-                    <strong>{d.name}</strong>{" "}
-                    <span style={styles.muted}>{`${prettyBytes(d.size)} · ${(d.status || "unknown").toLowerCase()}${d.hash ? ` · ${shortHash(d.hash)}` : ""}`}</span>
-                    {d.hash && (<button style={{ ...styles.subtleButton, marginLeft: 8 }} onClick={() => handlePreview(d)} disabled={previewLoading && selectedDoc && selectedDoc.hash === d.hash} title="Preview extracted text">{previewLoading && selectedDoc && selectedDoc.hash === d.hash ? "Loading…" : "Preview"}</button>)}
-                    {String(d.status || "").toLowerCase() === "error" && d.hash && (<button style={{ ...styles.subtleButton, marginLeft: 8 }} onClick={() => handleRetry(d.hash)} disabled={retryingHash === d.hash}>{retryingHash === d.hash ? "Retrying…" : "Retry"}</button>)}
-                  </div>
-                  {d.last_ingested_at && (<div style={styles.muted}>Last ingested {formatDate(d.last_ingested_at)}</div>)}
-                  {d.error && (<div style={styles.error}>Error: {d.error}</div>)}
-                </li>
-              ))}
+              {displayDocs.map((d) => {
+                const perf = d.performance;
+                const hasPerf = perf && perf.total_time_sec != null;
+                const isExpanded = expandedPerf.has(d.hash);
+                
+                return (
+                  <li key={d.hash || d.stored_name || d.name} style={styles.listItem}>
+                    <div title={d.path}>
+                      <strong>{d.name}</strong>{" "}
+                      <span style={styles.muted}>{`${prettyBytes(d.size)} · ${(d.status || "unknown").toLowerCase()}${d.hash ? ` · ${shortHash(d.hash)}` : ""}`}</span>
+                      {d.hash && (<button style={{ ...styles.subtleButton, marginLeft: 8 }} onClick={() => handlePreview(d)} disabled={previewLoading && selectedDoc && selectedDoc.hash === d.hash} title="Preview extracted text">{previewLoading && selectedDoc && selectedDoc.hash === d.hash ? "Loading…" : "Preview"}</button>)}
+                      {String(d.status || "").toLowerCase() === "error" && d.hash && (<button style={{ ...styles.subtleButton, marginLeft: 8 }} onClick={() => handleRetry(d.hash)} disabled={retryingHash === d.hash}>{retryingHash === d.hash ? "Retrying…" : "Retry"}</button>)}
+                    </div>
+                    {d.last_ingested_at && (<div style={styles.muted}>Last ingested {formatDate(d.last_ingested_at)}</div>)}
+                    {d.error && (<div style={styles.error}>Error: {d.error}</div>)}
+                    
+                    {/* Performance Metrics */}
+                    {hasPerf && (
+                      <div style={{ marginTop: 8 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ fontSize: 11, color: "rgba(148, 163, 184, 0.7)" }}>⚡</span>
+                          <span style={{ fontSize: 12, fontWeight: 600, color: "#c7d7ff" }}>
+                            {perf.total_time_sec.toFixed(1)}s
+                          </span>
+                          <button
+                            onClick={() => {
+                              const newSet = new Set(expandedPerf);
+                              if (isExpanded) newSet.delete(d.hash);
+                              else newSet.add(d.hash);
+                              setExpandedPerf(newSet);
+                            }}
+                            style={{
+                              ...styles.subtleButton,
+                              padding: "2px 6px",
+                              fontSize: 11,
+                              marginLeft: 4,
+                              border: "none",
+                              background: "transparent",
+                              color: "rgba(148, 163, 184, 0.7)",
+                            }}
+                            title={isExpanded ? "Hide breakdown" : "Show breakdown"}
+                          >
+                            {isExpanded ? "▼" : "▶"}
+                          </button>
+                        </div>
+                        
+                        {isExpanded && (
+                          <div style={{ marginTop: 6, marginLeft: 20, fontSize: 11, color: "rgba(148, 163, 184, 0.85)", lineHeight: 1.6 }}>
+                            {perf.pymupdf_time_sec != null && (
+                              <div>• PyMuPDF: {perf.pymupdf_time_sec.toFixed(2)}s</div>
+                            )}
+                            {perf.mineru_time_sec != null && (
+                              <div>• MinerU: {perf.mineru_time_sec.toFixed(2)}s</div>
+                            )}
+                            {perf.mineru_time_sec == null && (
+                              <div style={{ opacity: 0.6 }}>• MinerU: skipped</div>
+                            )}
+                            {perf.chunking_time_sec != null && (
+                              <div>• Chunking: {perf.chunking_time_sec.toFixed(2)}s</div>
+                            )}
+                            {perf.embedding_time_sec != null && (
+                              <div>• Embeddings: {perf.embedding_time_sec.toFixed(2)}s</div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
