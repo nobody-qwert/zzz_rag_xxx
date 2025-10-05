@@ -60,7 +60,7 @@ The application will automatically fall back to CPU mode. Set `MINERU_DEVICE_MOD
    - Copy `.env.example` to `.env`
    - Configure the following variables:
      ```
-     OPENAI_BASE_URL=http://host.docker.internal:1234/v1
+     OPENAI_BASE_URL=http://host:1234/v1
      OPENAI_API_KEY=lm-studio
      LLM_MODEL=your-model-name
      EMBEDDING_MODEL=text-embedding-3-small
