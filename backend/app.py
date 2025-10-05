@@ -182,15 +182,18 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
 
         total_time = time.perf_counter() - start_total
 
-        # Save performance metrics
-        await document_store.save_performance_metrics(
-            doc_hash,
-            pymupdf_time_sec=pymupdf_time,
-            mineru_time_sec=mineru_time,
-            chunking_time_sec=chunking_time,
-            embedding_time_sec=embedding_time,
-            total_time_sec=total_time,
-        )
+        # Save performance metrics (with error handling to prevent crashes)
+        try:
+            await document_store.save_performance_metrics(
+                doc_hash,
+                pymupdf_time_sec=pymupdf_time,
+                mineru_time_sec=mineru_time,
+                chunking_time_sec=chunking_time,
+                embedding_time_sec=embedding_time,
+                total_time_sec=total_time,
+            )
+        except Exception as perf_exc:
+            logger.warning("Failed to save performance metrics for %s: %s", doc_hash, perf_exc)
 
         await document_store.mark_document_processed(doc_hash)
         await document_store.finish_job(job_id, "done")

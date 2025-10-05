@@ -49,11 +49,11 @@ export default function IngestPage({ systemStatus = {} }) {
 
   const [docs, setDocs] = useState([]);
   const [docsLoading, setDocsLoading] = useState(false);
-  const [file, setFile] = useState(null);
+  const [files, setFiles] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState("");
-  const [jobId, setJobId] = useState(null);
-  const [processing, setProcessing] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState([]);
+  const [activeJobs, setActiveJobs] = useState(new Set());
   const [retryingHash, setRetryingHash] = useState(null);
   const [selectedDoc, setSelectedDoc] = useState(null);
   const [preview, setPreview] = useState("");
@@ -76,24 +76,74 @@ export default function IngestPage({ systemStatus = {} }) {
   const systemDocs = useMemo(() => (Array.isArray(systemStatus.documents) ? systemStatus.documents : []), [systemStatus.documents]);
   const displayDocs = docs.length ? docs : systemDocs;
 
-  const handleUpload = async () => {
-    if (!file) { setUploadStatus("Select a file first."); return; }
-    setUploading(true); setUploadStatus("Uploading...");
-    try {
-      const form = new FormData(); form.append("file", file);
-      const res = await fetch(api.ingest, { method: "POST", body: form });
-      const data = await readJsonSafe(res);
-      if (!res.ok) throw new Error((data && (data.detail || data.error || data.raw)) || res.statusText);
-      if (data.status === "skipped") { setUploadStatus(`Already ingested (hash ${shortHash(data.hash)})`); setProcessing(false); setJobId(null); return; }
-      if (!data.job_id) throw new Error("Upload did not return a job identifier");
-      setJobId(data.job_id); setProcessing(true); setUploadStatus(`Queued (job ${data.job_id})`);
-    } catch (e) { setUploadStatus(`Upload failed: ${e.message || String(e)}`); }
-    finally { setUploading(false); setFile(null); }
+  const handleUploadAll = async () => {
+    if (files.length === 0) { setUploadStatus("Select files first."); return; }
+    
+    setUploading(true);
+    setUploadStatus(`Uploading ${files.length} file(s)...`);
+    
+    // Initialize progress tracking
+    const progress = files.map((f, idx) => ({
+      id: idx,
+      name: f.name,
+      status: "pending",
+      jobId: null,
+      error: null,
+    }));
+    setUploadProgress(progress);
+    
+    // Upload all files in parallel
+    const uploadPromises = files.map(async (file, idx) => {
+      try {
+        // Update status to uploading
+        setUploadProgress(prev => prev.map((p, i) => 
+          i === idx ? { ...p, status: "uploading" } : p
+        ));
+        
+        const form = new FormData();
+        form.append("file", file);
+        const res = await fetch(api.ingest, { method: "POST", body: form });
+        const data = await readJsonSafe(res);
+        
+        if (!res.ok) throw new Error((data && (data.detail || data.error || data.raw)) || res.statusText);
+        
+        if (data.status === "skipped") {
+          setUploadProgress(prev => prev.map((p, i) => 
+            i === idx ? { ...p, status: "skipped", error: "Already ingested" } : p
+          ));
+        } else if (data.job_id) {
+          setUploadProgress(prev => prev.map((p, i) => 
+            i === idx ? { ...p, status: "queued", jobId: data.job_id } : p
+          ));
+          setActiveJobs(prev => new Set([...prev, data.job_id]));
+        }
+      } catch (e) {
+        setUploadProgress(prev => prev.map((p, i) => 
+          i === idx ? { ...p, status: "error", error: e.message || String(e) } : p
+        ));
+      }
+    });
+    
+    await Promise.all(uploadPromises);
+    setUploading(false);
+    setUploadStatus(`Uploaded ${files.length} file(s). Processing...`);
+    void refreshDocs();
   };
 
   const handleRetry = useCallback(async (hash) => {
-    if (!hash) return; setRetryingHash(hash); setUploadStatus(`Retrying ingestion for ${shortHash(hash)}...`);
-    try { const res = await fetch(api.retry(hash), { method: "POST" }); const data = await readJsonSafe(res); if (!res.ok) throw new Error((data && (data.detail || data.error || data.raw)) || res.statusText); setJobId(data.job_id || null); setProcessing(true); setUploadStatus(`Re-queued (job ${data.job_id})`); void refreshDocs(); }
+    if (!hash) return; 
+    setRetryingHash(hash); 
+    setUploadStatus(`Retrying ingestion for ${shortHash(hash)}...`);
+    try { 
+      const res = await fetch(api.retry(hash), { method: "POST" }); 
+      const data = await readJsonSafe(res); 
+      if (!res.ok) throw new Error((data && (data.detail || data.error || data.raw)) || res.statusText); 
+      if (data.job_id) {
+        setActiveJobs(prev => new Set([...prev, data.job_id]));
+        setUploadStatus(`Re-queued (job ${data.job_id})`);
+      }
+      void refreshDocs(); 
+    }
     catch (e) { setUploadStatus(`Retry failed: ${e.message || String(e)}`); }
     finally { setRetryingHash(null); }
   }, [api, refreshDocs]);
@@ -105,7 +155,40 @@ export default function IngestPage({ systemStatus = {} }) {
     finally { setPreviewLoading(false); }
   }, [api, previewMaxChars, parser]);
 
-  useEffect(() => { if (!jobId) return; const id = setInterval(async () => { try { const res = await fetch(`/api/status/${jobId}`); const data = await readJsonSafe(res); if (res.ok && data.status) { const st = String(data.status).toLowerCase(); if (st === "done") { setProcessing(false); setJobId(null); setUploadStatus("Ingestion complete."); void refreshDocs(); clearInterval(id); } else if (st.startsWith("error")) { setProcessing(false); setJobId(null); setUploadStatus(`Ingestion error: ${data.status}`); clearInterval(id); } } } catch {} }, 1500); return () => clearInterval(id); }, [jobId, refreshDocs]);
+  // Poll active jobs
+  useEffect(() => {
+    if (activeJobs.size === 0) return;
+    
+    const id = setInterval(async () => {
+      const jobsToCheck = Array.from(activeJobs);
+      const results = await Promise.all(
+        jobsToCheck.map(async (jobId) => {
+          try {
+            const res = await fetch(api.status(jobId));
+            const data = await readJsonSafe(res);
+            if (res.ok && data.status) {
+              const st = String(data.status).toLowerCase();
+              return { jobId, status: st };
+            }
+          } catch {}
+          return { jobId, status: null };
+        })
+      );
+      
+      // Remove completed jobs
+      const completedJobs = results.filter(r => r.status === "done" || r.status?.startsWith("error"));
+      if (completedJobs.length > 0) {
+        setActiveJobs(prev => {
+          const newSet = new Set(prev);
+          completedJobs.forEach(j => newSet.delete(j.jobId));
+          return newSet;
+        });
+        void refreshDocs();
+      }
+    }, 2000);
+    
+    return () => clearInterval(id);
+  }, [activeJobs, api, refreshDocs]);
 
   return (
     <div style={styles.page}>
@@ -113,15 +196,66 @@ export default function IngestPage({ systemStatus = {} }) {
         <section style={styles.card}>
           <div style={styles.sectionHeader}>
             <h3 style={styles.sectionTitle}>Upload Documents</h3>
-            <span style={styles.badge}>{processing ? "Processing" : uploading ? "Uploading" : "Ready"}</span>
+            <span style={styles.badge}>{uploading ? "Uploading" : activeJobs.size > 0 ? "Processing" : "Ready"}</span>
           </div>
           <div style={styles.row}>
-            <input type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} style={styles.input} />
-            <button onClick={handleUpload} disabled={uploading || processing || !file} style={{ ...styles.button, opacity: uploading || processing || !file ? 0.6 : 1 }}>
-              {uploading ? "Uploading…" : processing ? "Processing…" : "Ingest"}
+            <input 
+              type="file" 
+              multiple 
+              onChange={(e) => setFiles(Array.from(e.target.files || []))} 
+              style={styles.input} 
+            />
+            <button 
+              onClick={handleUploadAll} 
+              disabled={uploading || files.length === 0} 
+              style={{ ...styles.button, opacity: uploading || files.length === 0 ? 0.6 : 1 }}
+            >
+              {uploading ? "Uploading…" : `Ingest ${files.length > 0 ? `(${files.length})` : ""}`}
             </button>
           </div>
-          <div style={styles.feedback}>{uploadStatus || "PDFs supported. Large files allowed."}</div>
+          <div style={styles.feedback}>
+            {uploadStatus || (files.length > 0 ? `${files.length} file(s) selected` : "PDFs supported. Select multiple files.")}
+          </div>
+          
+          {/* Upload Progress */}
+          {uploadProgress.length > 0 && (
+            <div style={{ marginTop: 12, maxHeight: "200px", overflow: "auto" }}>
+              {uploadProgress.map((p) => (
+                <div 
+                  key={p.id} 
+                  style={{ 
+                    fontSize: 12, 
+                    padding: "6px 8px", 
+                    marginBottom: 4, 
+                    background: "rgba(23, 25, 35, 0.5)", 
+                    borderRadius: 6,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8
+                  }}
+                >
+                  <span>
+                    {p.status === "pending" && "⏸"}
+                    {p.status === "uploading" && "⏳"}
+                    {p.status === "queued" && "✓"}
+                    {p.status === "skipped" && "⊘"}
+                    {p.status === "error" && "✗"}
+                  </span>
+                  <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {p.name}
+                  </span>
+                  <span style={{ fontSize: 11, color: "rgba(148, 163, 184, 0.7)" }}>
+                    {p.status === "queued" && p.jobId ? `job ${shortHash(p.jobId)}` : p.status}
+                  </span>
+                  {p.error && (
+                    <span style={{ fontSize: 11, color: "#ff8f8f" }} title={p.error}>
+                      {p.error.length > 20 ? p.error.substring(0, 20) + "..." : p.error}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </section>
 
         <section style={styles.card}>
