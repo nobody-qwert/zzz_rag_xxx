@@ -109,8 +109,27 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
                   <div style={{ fontWeight: 600, marginBottom: 6 }}>Sources</div>
                   <ol style={{ margin: 0, paddingLeft: 18 }}>
                     {sources.map((s, i) => (
-                      <li key={i} style={{ marginBottom: 6 }}>
-                        <code style={styles.kbd}>{summarizeSource(s)}</code>
+                      <li key={i} style={{ marginBottom: 8 }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                          <div>
+                            <strong style={{ color: "rgba(226, 232, 240, 0.95)" }}>
+                              {s.document_name || "unknown"}
+                            </strong>
+                            {s.total_chunks > 0 && (
+                              <span style={{ marginLeft: 8, fontSize: 12 }}>
+                                chunk {s.order_index + 1}/{s.total_chunks}
+                              </span>
+                            )}
+                            <span style={{ marginLeft: 8, fontSize: 12, color: "rgba(148, 163, 184, 0.7)" }}>
+                              similarity: {(s.score * 100).toFixed(1)}%
+                            </span>
+                          </div>
+                          {s.chunk_text_preview && (
+                            <div style={{ fontSize: 11, color: "rgba(148, 163, 184, 0.6)", fontStyle: "italic", marginTop: 2 }}>
+                              "{s.chunk_text_preview}..."
+                            </div>
+                          )}
+                        </div>
                       </li>
                     ))}
                   </ol>

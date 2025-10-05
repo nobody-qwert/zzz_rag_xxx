@@ -401,6 +401,16 @@ async def ask(req: AskRequest) -> AskResponse:
     emb_rows = await document_store.fetch_embeddings_for_chunks(chunk_ids)
     emb_by_id = {r.chunk_id: r for r in emb_rows}
 
+    # Get document metadata for all chunks
+    docs = await document_store.list_documents()
+    docs_by_hash = {d["doc_hash"]: d for d in docs}
+    
+    # Count total chunks per document
+    chunks_per_doc: Dict[str, int] = {}
+    for c in chunks:
+        dh = c["doc_hash"]
+        chunks_per_doc[dh] = chunks_per_doc.get(dh, 0) + 1
+
     scored: List[Dict[str, Any]] = []
     for c in chunks:
         r = emb_by_id.get(c["chunk_id"])  # type: ignore
@@ -445,15 +455,23 @@ async def ask(req: AskRequest) -> AskResponse:
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"LLM call failed: {exc}")
 
-    sources = [
-        {
-            "chunk_id": t["chunk"]["chunk_id"],
+    sources = []
+    for t in top:
+        chunk = t["chunk"]
+        doc_hash = chunk["doc_hash"]
+        doc = docs_by_hash.get(doc_hash, {})
+        total_chunks = chunks_per_doc.get(doc_hash, 0)
+        
+        sources.append({
+            "chunk_id": chunk["chunk_id"],
             "score": t["score"],
-            "doc_hash": t["chunk"]["doc_hash"],
-            "order_index": t["chunk"]["order_index"],
-        }
-        for t in top
-    ]
+            "doc_hash": doc_hash,
+            "order_index": chunk["order_index"],
+            "document_name": doc.get("original_name", "unknown"),
+            "total_chunks": total_chunks,
+            "chunk_text_preview": chunk["text"][:200] if chunk.get("text") else "",
+        })
+    
     return AskResponse(answer=answer, sources=sources)
 
 
