@@ -355,9 +355,19 @@ async def debug_parsed_text(doc_hash: str, parser: str = "mineru", max_chars: in
     if not row:
         raise HTTPException(status_code=404, detail=f"No extraction found for parser '{parser}'")
     text = row["text"] or ""
+    
+    # Get chunk statistics for this document
+    chunks = await document_store.fetch_chunks(doc_hash=doc_hash, parser=parser)
+    total_tokens = sum(c.get("token_count", 0) for c in chunks)
+    chunk_count = len(chunks)
+    
     return {
         "parser": parser,
+        "document_name": doc.get("original_name", "unknown"),
+        "file_size": doc.get("size", 0),
         "extracted_chars": len(text),
+        "total_tokens": total_tokens,
+        "chunk_count": chunk_count,
         "preview_chars": min(max_chars, len(text)),
         "truncated": len(text) > max_chars,
         "preview": text[:max_chars],

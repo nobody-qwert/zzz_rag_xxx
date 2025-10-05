@@ -99,7 +99,7 @@ export default function IngestPage({ systemStatus = {} }) {
 
   const handlePreview = useCallback(async (doc) => {
     if (!doc || !doc.hash) return; setSelectedDoc(doc); setPreview(""); setPreviewError(""); setPreviewInfo(null); setPreviewLoading(true);
-    try { const res = await fetch(api.previewText(doc.hash, previewMaxChars, parser)); const data = await readJsonSafe(res); if (!res.ok) throw new Error((data && (data.detail || data.error || data.raw)) || `GET preview ${res.status}`); setPreview(typeof data.preview === "string" ? data.preview : ""); setPreviewInfo({ extracted_chars: data.extracted_chars, preview_chars: data.preview_chars, truncated: !!data.truncated, parser }); }
+    try { const res = await fetch(api.previewText(doc.hash, previewMaxChars, parser)); const data = await readJsonSafe(res); if (!res.ok) throw new Error((data && (data.detail || data.error || data.raw)) || `GET preview ${res.status}`); setPreview(typeof data.preview === "string" ? data.preview : ""); setPreviewInfo({ document_name: data.document_name, file_size: data.file_size, extracted_chars: data.extracted_chars, total_tokens: data.total_tokens, chunk_count: data.chunk_count, preview_chars: data.preview_chars, truncated: !!data.truncated, parser }); }
     catch (e) { setPreviewError(e.message || String(e)); }
     finally { setPreviewLoading(false); }
   }, [api, previewMaxChars, parser]);
@@ -125,30 +125,77 @@ export default function IngestPage({ systemStatus = {} }) {
 
         <section style={styles.card}>
           <div style={styles.sectionHeader}>
-            <h3 style={styles.sectionTitle}>Parsed Text Preview</h3>
-            <span style={styles.badge}>{parser}</span>
+            <h3 style={styles.sectionTitle}>Document Details & Preview</h3>
+            {selectedDoc && <span style={styles.badge}>{parser}</span>}
           </div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
-            <label style={{ ...styles.muted }}>Parser</label>
-            <select value={parser} onChange={(e) => setParser(e.target.value)} style={{ ...styles.input }}>
-              <option value="mineru">mineru</option>
-              <option value="pymupdf">pymupdf</option>
-            </select>
-            <label style={{ ...styles.muted, marginLeft: 12 }}>Max chars</label>
-            <input type="number" min={200} max={20000} step={100} value={previewMaxChars} onChange={(e) => setPreviewMaxChars(Number(e.target.value) || 2000)} style={{ ...styles.input, width: 110 }} />
-          </div>
+          
           {selectedDoc ? (
-            <button style={styles.subtleButton} onClick={() => selectedDoc && handlePreview(selectedDoc)} disabled={!selectedDoc || previewLoading}>
-              {previewLoading ? "Refreshing…" : "Refresh"}
-            </button>
+            <>
+              {/* Document Metadata Section */}
+              <div style={{ background: "rgba(23, 25, 35, 0.6)", border: "1px solid rgba(148, 163, 184, 0.12)", borderRadius: 12, padding: 16, marginBottom: 16 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                  <span style={{ fontSize: 18 }}>📄</span>
+                  <strong style={{ fontSize: 15, color: "#e2e8f0" }}>{previewInfo?.document_name || selectedDoc.name}</strong>
+                </div>
+                
+                {/* Statistics Grid */}
+                {previewInfo && (
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))", gap: 12, marginBottom: 12 }}>
+                    <div style={{ textAlign: "center", padding: "8px 12px", background: "rgba(84, 105, 255, 0.08)", borderRadius: 8, border: "1px solid rgba(84, 105, 255, 0.2)" }}>
+                      <div style={{ fontSize: 16, fontWeight: 600, color: "#c7d7ff" }}>{prettyBytes(previewInfo.file_size)}</div>
+                      <div style={{ fontSize: 11, color: "rgba(148, 163, 184, 0.85)", marginTop: 2 }}>File Size</div>
+                    </div>
+                    <div style={{ textAlign: "center", padding: "8px 12px", background: "rgba(84, 105, 255, 0.08)", borderRadius: 8, border: "1px solid rgba(84, 105, 255, 0.2)" }}>
+                      <div style={{ fontSize: 16, fontWeight: 600, color: "#c7d7ff" }}>{(previewInfo.extracted_chars || 0).toLocaleString()}</div>
+                      <div style={{ fontSize: 11, color: "rgba(148, 163, 184, 0.85)", marginTop: 2 }}>Characters</div>
+                    </div>
+                    <div style={{ textAlign: "center", padding: "8px 12px", background: "rgba(84, 105, 255, 0.08)", borderRadius: 8, border: "1px solid rgba(84, 105, 255, 0.2)" }}>
+                      <div style={{ fontSize: 16, fontWeight: 600, color: "#c7d7ff" }}>{(previewInfo.total_tokens || 0).toLocaleString()}</div>
+                      <div style={{ fontSize: 11, color: "rgba(148, 163, 184, 0.85)", marginTop: 2 }}>Tokens</div>
+                    </div>
+                    <div style={{ textAlign: "center", padding: "8px 12px", background: "rgba(84, 105, 255, 0.08)", borderRadius: 8, border: "1px solid rgba(84, 105, 255, 0.2)" }}>
+                      <div style={{ fontSize: 16, fontWeight: 600, color: "#c7d7ff" }}>{previewInfo.chunk_count || 0}</div>
+                      <div style={{ fontSize: 11, color: "rgba(148, 163, 184, 0.85)", marginTop: 2 }}>Embeddings</div>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Parser Controls */}
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <label style={{ ...styles.muted, fontSize: 12 }}>Parser</label>
+                  <select value={parser} onChange={(e) => setParser(e.target.value)} style={{ ...styles.input, padding: "6px 10px", fontSize: 13 }}>
+                    <option value="mineru">mineru</option>
+                    <option value="pymupdf">pymupdf</option>
+                  </select>
+                  <label style={{ ...styles.muted, fontSize: 12, marginLeft: 8 }}>Max chars</label>
+                  <input type="number" min={200} max={20000} step={100} value={previewMaxChars} onChange={(e) => setPreviewMaxChars(Number(e.target.value) || 2000)} style={{ ...styles.input, width: 100, padding: "6px 10px", fontSize: 13 }} />
+                  <button style={{ ...styles.subtleButton, marginLeft: "auto" }} onClick={() => handlePreview(selectedDoc)} disabled={previewLoading}>
+                    {previewLoading ? "Refreshing…" : "Refresh"}
+                  </button>
+                </div>
+              </div>
+              
+              {/* Text Preview Section */}
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(148, 163, 184, 0.9)", marginBottom: 8 }}>Extracted Text</div>
+                <div style={{ border: "1px solid rgba(148,163,184,0.12)", borderRadius: 12, background: "rgba(9, 11, 18, 0.72)", padding: 12, maxHeight: "40vh", overflow: "auto", whiteSpace: "pre-wrap", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace", fontSize: 13, lineHeight: 1.5 }}>
+                  {preview || (previewLoading ? "Loading…" : "No text extracted.")}
+                </div>
+                {previewInfo && (
+                  <div style={{ ...styles.muted, marginTop: 8, fontSize: 12 }}>
+                    {`Showing ${(previewInfo.preview_chars || 0).toLocaleString()} of ${(previewInfo.extracted_chars || 0).toLocaleString()} characters`}
+                    {previewInfo.truncated ? " (truncated)" : ""}
+                  </div>
+                )}
+                {previewError && (<div style={styles.error}>Error: {previewError}</div>)}
+              </div>
+            </>
           ) : (
-            <div style={styles.muted}>Select a document below to preview its text</div>
+            <div style={{ textAlign: "center", padding: "40px 20px", color: "rgba(148, 163, 184, 0.7)" }}>
+              <div style={{ fontSize: 32, marginBottom: 12 }}>📄</div>
+              <div>Select a document from the library below to view its details and preview the extracted text.</div>
+            </div>
           )}
-          <div style={{ border: "1px solid rgba(148,163,184,0.12)", borderRadius: 12, background: "rgba(9, 11, 18, 0.72)", padding: 12, maxHeight: "45vh", overflow: "auto", whiteSpace: "pre-wrap", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace", fontSize: 13, lineHeight: 1.5, marginTop: 12 }}>
-            {selectedDoc ? (preview || (previewLoading ? "Loading…" : "No text extracted.")) : "Choose a document to preview its extracted text."}
-          </div>
-          {previewInfo && (<div style={{ ...styles.muted, marginTop: 8 }}>{`Previewed ${previewInfo.preview_chars || 0} / ${previewInfo.extracted_chars || 0} chars (${previewInfo.parser})`}{previewInfo.truncated ? " (truncated)" : ""}</div>)}
-          {previewError && (<div style={styles.error}>Error: {previewError}</div>)}
         </section>
       </div>
 
