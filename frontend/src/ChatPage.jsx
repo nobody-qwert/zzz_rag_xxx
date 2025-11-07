@@ -303,9 +303,9 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
             <ul style={{ margin: 0, paddingLeft: 0, listStyle: "none" }}>
               {displayDocs.map((d) => (
                 <li key={d.hash || d.stored_name || d.name} style={styles.listItem}>
-                  <div title={d.path}>
-                    <strong>{d.name}</strong>{" "}
-                    <span style={styles.muted}>{`${prettyBytes(d.size)}${d.hash ? ` · ${shortHash(d.hash)}` : ""}`}</span>
+                  <div title={d.path} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <strong>{d.name}</strong>
+                    <span style={{ ...styles.muted, fontSize: 12 }}>{`${prettyBytes(d.size)}${d.hash ? ` · ${shortHash(d.hash)}` : ""}`}</span>
                   </div>
                 </li>
               ))}
