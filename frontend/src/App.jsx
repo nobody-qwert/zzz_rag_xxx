@@ -166,6 +166,6 @@ const styles = {
   statusPill: { padding: "6px 12px", borderRadius: 999, border: "1px solid rgba(56,189,248,0.35)", color: "rgba(125,211,252,0.92)", fontSize: 12, letterSpacing: 0.5, textTransform: "uppercase" },
   main: { flex: 1, padding: "24px 20px 36px" },
   content: { maxWidth: "1200px", margin: "0 auto", width: "100%", padding: "0 4px" },
-  navButton: { font: "inherit", padding: "10px 18px", borderRadius: 0, border: "1px solid rgba(84,105,255,0.4)", background: "transparent", color: "#c7d7ff", textDecoration: "none", transition: "background 0.2s ease, border 0.2s ease" },
+  navButton: { font: "inherit", fontSize: 14, padding: "6px 13px", borderRadius: 0, border: "1px solid rgba(84,105,255,0.4)", background: "transparent", color: "#c7d7ff", textDecoration: "none", transition: "background 0.2s ease, border 0.2s ease" },
   muted: { fontSize: 13, color: "rgba(148,163,184,0.8)" },
 };

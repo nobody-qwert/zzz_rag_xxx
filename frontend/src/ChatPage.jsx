@@ -31,9 +31,9 @@ const styles = {
   sectionHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" },
   sectionTitle: { margin: 0, fontSize: 20, fontWeight: 600, letterSpacing: 0.25 },
   badge: { padding: "6px 12px", borderRadius: 999, border: "1px solid rgba(148, 163, 184, 0.35)", fontSize: 12, color: "rgba(148, 163, 184, 0.85)", whiteSpace: "nowrap" },
-  button: { font: "inherit", padding: "8px 14px", borderRadius: 0, border: "1px solid rgba(84, 105, 255, 0.45)", background: "linear-gradient(135deg, rgba(84, 105, 255, 0.18), rgba(84, 105, 255, 0.05))", color: "#c7d7ff", cursor: "pointer" },
-  subtleButton: { font: "inherit", padding: "5px 10px", borderRadius: 0, border: "1px solid rgba(148, 163, 184, 0.35)", background: "rgba(15, 17, 23, 0.6)", color: "rgba(226, 232, 240, 0.9)", cursor: "pointer" },
-  input: { font: "inherit", padding: "9px 12px", borderRadius: 0, border: "1px solid rgba(148, 163, 184, 0.35)", background: "rgba(9, 11, 18, 0.82)", color: "inherit", flex: 1, minWidth: 0 },
+  button: { font: "inherit", fontSize: 14, padding: "6px 12px", borderRadius: 0, border: "1px solid rgba(84, 105, 255, 0.45)", background: "linear-gradient(135deg, rgba(84, 105, 255, 0.18), rgba(84, 105, 255, 0.05))", color: "#c7d7ff", cursor: "pointer" },
+  subtleButton: { font: "inherit", fontSize: 13, padding: "4px 10px", borderRadius: 0, border: "1px solid rgba(148, 163, 184, 0.35)", background: "rgba(15, 17, 23, 0.6)", color: "rgba(226, 232, 240, 0.9)", cursor: "pointer" },
+  input: { font: "inherit", padding: "8px 12px", borderRadius: 0, border: "1px solid rgba(148, 163, 184, 0.35)", background: "rgba(9, 11, 18, 0.82)", color: "inherit", flex: 1, minWidth: 0 },
   muted: { fontSize: 13, color: "rgba(148, 163, 184, 0.78)" },
   messages: { minHeight: 240, maxHeight: "48vh", overflow: "auto", border: "1px solid rgba(148, 163, 184, 0.12)", borderRadius: 0, padding: 12, background: "rgba(9, 11, 18, 0.78)", whiteSpace: "pre-wrap", display: "flex", flexDirection: "column", gap: 8 },
   messageList: { display: "flex", flexDirection: "column", gap: 8 },
@@ -284,7 +284,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <input type="text" placeholder={warmingUp && !warmedUp ? "Warming up model..." : "Ask a question about your docs..."} value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !(warmingUp && !warmedUp)) handleAsk(); }} disabled={(warmingUp && !warmedUp) || pendingFollowUp || continuing} style={{ ...styles.input, opacity: (warmingUp && !warmedUp) || pendingFollowUp || continuing ? 0.6 : 1 }} />
-          <button onClick={handleAsk} disabled={asking || !query.trim() || (warmingUp && !warmedUp) || pendingFollowUp || continuing} style={{ ...styles.button, opacity: (asking || !query.trim() || (warmingUp && !warmedUp) || pendingFollowUp || continuing) ? 0.6 : 1 }}>
+          <button onClick={handleAsk} disabled={asking || !query.trim() || (warmingUp && !warmedUp) || pendingFollowUp || continuing} style={{ ...styles.button, minWidth: 70, letterSpacing: 0.3, opacity: (asking || !query.trim() || (warmingUp && !warmedUp) || pendingFollowUp || continuing) ? 0.6 : 1 }}>
             {asking ? "Asking..." : warmingUp && !warmedUp ? "Warming up..." : "Ask"}
           </button>
         </div>
