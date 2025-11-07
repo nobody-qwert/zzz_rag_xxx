@@ -121,6 +121,19 @@ You can significantly speed up ingestion for digital PDFs (not scans) by using e
 
 Tip: For docs without complex tables or formulas, disabling those passes saves time and VRAM.
 
+## Supported Formats
+
+- PDFs only. Image files (PNG/JPG), Office docs, and other formats are not parsed by MinerU in this demo.
+- If you need to ingest images, convert them to PDF first (most OS print dialogs can “Save as PDF”).
+
+Troubleshooting
+- Error: "Failed to load document (PDFium: Data format error)"
+  - Cause: MinerU (via PDFium) was asked to open a non‑PDF file or a corrupted PDF.
+  - Fixes in this repo:
+    - The frontend file picker now only accepts `.pdf`.
+    - The backend skips MinerU for non‑PDFs and falls back to PyMuPDF text extraction instead of failing the job.
+  - If the error persists on a real PDF, re‑download the file or try printing it to a new PDF (to repair damaged structure).
+
 Notes
 - This app lives outside sample_apps per project guidance
 - The backend uses uv for fast installs and installs CUDA torch explicitly

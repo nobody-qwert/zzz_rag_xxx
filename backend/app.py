@@ -79,6 +79,22 @@ async def _extract_pymupdf(path: Path) -> Dict[str, Any]:
     return await asyncio.to_thread(_run)
 
 
+def _is_pdf_file(path: Path) -> bool:
+    """Best-effort check whether the file is a real PDF.
+
+    Prefer header magic ("%PDF-") and fall back to extension if unreadable.
+    """
+    try:
+        with open(path, "rb") as f:
+            sig = f.read(5)
+            if isinstance(sig, bytes) and sig.startswith(b"%PDF-"):
+                return True
+    except Exception:
+        # Fall back to extension check if we cannot read the file
+        pass
+    return path.suffix.lower() == ".pdf"
+
+
 async def _compute_embeddings_for_chunks(chunks: List[Dict[str, Any]], client: EmbeddingClient, doc_hash: str) -> List[EmbeddingRow]:
     texts = [c["text"] for c in chunks]
     vectors = await client.embed_batch(texts)
@@ -134,23 +150,45 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
             cpp = (len(pymupdf_text) / max(1, pages)) if pages else len(pymupdf_text)
             use_mineru = cpp < float(MIN_PYMUPDF_CHARS_PER_PAGE)
 
+        # Only run MinerU for actual PDFs; skip for images and other types
+        if use_mineru and not _is_pdf_file(doc_path):
+            use_mineru = False
+
         if use_mineru:
             # 2) MinerU rich extraction (GPU when available)
             start_mineru = time.perf_counter()
             mineru_dir = INDEX_DIR / f"mineru/{doc_hash}"
-            mineru_res = await asyncio.to_thread(
-                run_mineru,
-                doc_path,
-                mineru_dir,
-                parse_method=MINERU_PARSE_METHOD,
-                lang=MINERU_LANG,
-                table_enable=(MINERU_TABLE_ENABLE in {"1", "true", "yes", "on"}),
-                formula_enable=(MINERU_FORMULA_ENABLE in {"1", "true", "yes", "on"}),
-            )
-            mineru_time = time.perf_counter() - start_mineru
-            await document_store.upsert_extraction(doc_hash, "mineru", text=mineru_res.text, meta_json=json.dumps(mineru_res.metadata))
-            chosen_text = mineru_res.text
-            chosen_meta = {"parser_used": "mineru"}
+            try:
+                mineru_res = await asyncio.to_thread(
+                    run_mineru,
+                    doc_path,
+                    mineru_dir,
+                    parse_method=MINERU_PARSE_METHOD,
+                    lang=MINERU_LANG,
+                    table_enable=(MINERU_TABLE_ENABLE in {"1", "true", "yes", "on"}),
+                    formula_enable=(MINERU_FORMULA_ENABLE in {"1", "true", "yes", "on"}),
+                )
+                mineru_time = time.perf_counter() - start_mineru
+                await document_store.upsert_extraction(
+                    doc_hash,
+                    "mineru",
+                    text=mineru_res.text,
+                    meta_json=json.dumps(mineru_res.metadata),
+                )
+                chosen_text = mineru_res.text
+                chosen_meta = {"parser_used": "mineru"}
+            except Exception as exc:
+                # Graceful fallback: keep pipeline alive using PyMuPDF-only text
+                mineru_time = None
+                logger.warning("MinerU failed for %s: %s — falling back to PyMuPDF text", doc_path, exc)
+                chosen_text = pymupdf_text
+                chosen_meta = {"parser_used": "pymupdf", "reason": f"mineru_failed: {exc}"}
+                await document_store.upsert_extraction(
+                    doc_hash,
+                    "mineru",
+                    text=chosen_text,
+                    meta_json=json.dumps(chosen_meta),
+                )
         else:
             # Skip MinerU; use PyMuPDF-only text for downstream steps but store under 'mineru' chunks for compatibility
             chosen_text = pymupdf_text

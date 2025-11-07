@@ -21,8 +21,9 @@ function shortHash(h) { return (h || "").slice(0, 8); }
 function formatDate(v) { try { const d = new Date(v); return isNaN(d) ? "" : d.toLocaleString(); } catch { return ""; } }
 
 const styles = {
-  page: { display: "grid", gap: 24, gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", alignItems: "start" },
-  leftColumn: { display: "grid", gap: 24 },
+  page: { display: "flex", flexWrap: "wrap", gap: 24, alignItems: "flex-start" },
+  leftColumn: { display: "grid", gap: 24, flex: "2 1 520px", minWidth: 0 },
+  libraryCard: { flex: "1 1 360px", minWidth: 0 },
   card: { border: "1px solid rgba(148, 163, 184, 0.18)", borderRadius: 18, padding: "24px 28px", background: "rgba(13, 16, 24, 0.9)", boxShadow: "0 22px 45px rgba(2, 6, 23, 0.35)" },
   sectionHeader: { display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 16, marginBottom: 16 },
   sectionTitle: { margin: 0, fontSize: 18, fontWeight: 600, letterSpacing: 0.2 },
@@ -95,6 +96,14 @@ export default function IngestPage({ systemStatus = {} }) {
     // Upload all files in parallel
     const uploadPromises = files.map(async (file, idx) => {
       try {
+        // Client-side guard: only allow PDFs to be sent
+        const isPdf = (file && (file.type === "application/pdf" || /\.pdf$/i.test(file.name)));
+        if (!isPdf) {
+          setUploadProgress(prev => prev.map((p, i) => 
+            i === idx ? { ...p, status: "error", error: "Only PDF files are supported" } : p
+          ));
+          return;
+        }
         // Update status to uploading
         setUploadProgress(prev => prev.map((p, i) => 
           i === idx ? { ...p, status: "uploading" } : p
@@ -202,6 +211,7 @@ export default function IngestPage({ systemStatus = {} }) {
             <input 
               type="file" 
               multiple 
+              accept=".pdf,application/pdf"
               onChange={(e) => setFiles(Array.from(e.target.files || []))} 
               style={styles.input} 
             />
@@ -268,9 +278,11 @@ export default function IngestPage({ systemStatus = {} }) {
             <>
               {/* Document Metadata Section */}
               <div style={{ background: "rgba(23, 25, 35, 0.6)", border: "1px solid rgba(148, 163, 184, 0.12)", borderRadius: 12, padding: 16, marginBottom: 16 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
                   <span style={{ fontSize: 18 }}>📄</span>
-                  <strong style={{ fontSize: 15, color: "#e2e8f0" }}>{previewInfo?.document_name || selectedDoc.name}</strong>
+                  <strong style={{ fontSize: 15, color: "#e2e8f0", flex: 1, minWidth: 0, wordBreak: "break-word" }}>
+                    {previewInfo?.document_name || selectedDoc.name}
+                  </strong>
                 </div>
                 
                 {/* Statistics Grid */}
@@ -313,7 +325,7 @@ export default function IngestPage({ systemStatus = {} }) {
               {/* Text Preview Section */}
               <div>
                 <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(148, 163, 184, 0.9)", marginBottom: 8 }}>Extracted Text</div>
-                <div style={{ border: "1px solid rgba(148,163,184,0.12)", borderRadius: 12, background: "rgba(9, 11, 18, 0.72)", padding: 12, maxHeight: "40vh", overflow: "auto", whiteSpace: "pre-wrap", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace", fontSize: 13, lineHeight: 1.5 }}>
+                <div style={{ border: "1px solid rgba(148,163,184,0.12)", borderRadius: 12, background: "rgba(9, 11, 18, 0.72)", padding: 12, maxHeight: "40vh", overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word", overflowWrap: "anywhere", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace", fontSize: 13, lineHeight: 1.5 }}>
                   {preview || (previewLoading ? "Loading…" : "No text extracted.")}
                 </div>
                 {previewInfo && (
@@ -334,7 +346,7 @@ export default function IngestPage({ systemStatus = {} }) {
         </section>
       </div>
 
-      <section style={styles.card}>
+      <section style={{ ...styles.card, ...styles.libraryCard }}>
         <div style={styles.sectionHeader}>
           <div>
             <h3 style={styles.sectionTitle}>Document Library</h3>

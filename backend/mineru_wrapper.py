@@ -98,7 +98,8 @@ def run_mineru(
         device_mode=effective,
     )
 
-    md_path = out_dir / pdf_name / parse_method / f"{pdf_name}.md"
+    # Output directory structure mirrors parse_method used by MinerU
+    md_path = out_dir / pdf_name / p_method / f"{pdf_name}.md"
     if not md_path.exists():
         raise RuntimeError(f"MinerU did not produce expected Markdown at {md_path}")
 
