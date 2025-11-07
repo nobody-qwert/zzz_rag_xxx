@@ -156,7 +156,7 @@ export default function App() {
 const styles = {
   appShell: { minHeight: "100vh", display: "flex", flexDirection: "column", background: "radial-gradient(circle at top left, rgba(45,55,95,0.35), rgba(15,17,23,0.98) 55%)", color: "#f4f6fb" },
   headerShell: { borderBottom: "1px solid rgba(148,163,184,0.16)", background: "rgba(15,17,23,0.92)", backdropFilter: "blur(12px)" },
-  topRow: { maxWidth: "1200px", margin: "0 auto", padding: "18px 32px", display: "grid", gridTemplateColumns: "auto 1fr auto", alignItems: "center", gap: 24 },
+  topRow: { maxWidth: "1200px", margin: "0 auto", padding: "14px 24px", display: "grid", gridTemplateColumns: "auto 1fr auto", alignItems: "center", gap: 18 },
   topLeft: { display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" },
   navButtonGroup: { display: "flex", gap: 10, flexWrap: "wrap" },
   topCenter: { textAlign: "center" },
@@ -164,8 +164,8 @@ const styles = {
   appTitle: { margin: 0, fontSize: 22, fontWeight: 600, letterSpacing: 0.3 },
   tagline: { display: "block", fontSize: 14, color: "rgba(148,163,184,0.82)", marginTop: 4 },
   statusPill: { padding: "6px 12px", borderRadius: 999, border: "1px solid rgba(56,189,248,0.35)", color: "rgba(125,211,252,0.92)", fontSize: 12, letterSpacing: 0.5, textTransform: "uppercase" },
-  main: { flex: 1, padding: "32px 24px 48px" },
-  content: { maxWidth: "1200px", margin: "0 auto", width: "100%" },
-  navButton: { font: "inherit", padding: "10px 18px", borderRadius: 14, border: "1px solid rgba(84,105,255,0.4)", background: "transparent", color: "#c7d7ff", textDecoration: "none", transition: "background 0.2s ease, border 0.2s ease" },
+  main: { flex: 1, padding: "24px 20px 36px" },
+  content: { maxWidth: "1200px", margin: "0 auto", width: "100%", padding: "0 4px" },
+  navButton: { font: "inherit", padding: "10px 18px", borderRadius: 0, border: "1px solid rgba(84,105,255,0.4)", background: "transparent", color: "#c7d7ff", textDecoration: "none", transition: "background 0.2s ease, border 0.2s ease" },
   muted: { fontSize: 13, color: "rgba(148,163,184,0.8)" },
 };
