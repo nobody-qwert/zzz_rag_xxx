@@ -24,11 +24,11 @@ const styles = {
   page: { display: "flex", flexWrap: "wrap", gap: 18, alignItems: "flex-start" },
   leftColumn: { display: "grid", gap: 18, flex: "2 1 520px", minWidth: 0 },
   libraryCard: { flex: "1 1 360px", minWidth: 0 },
-  card: { border: "1px solid rgba(148, 163, 184, 0.18)", borderRadius: 0, padding: "20px 22px", background: "rgba(13, 16, 24, 0.9)", boxShadow: "0 18px 32px rgba(2, 6, 23, 0.35)" },
+  card: { border: "1px solid rgba(148, 163, 184, 0.18)", borderRadius: 0, padding: "16px 18px", background: "rgba(13, 16, 24, 0.9)", boxShadow: "0 18px 32px rgba(2, 6, 23, 0.35)" },
   sectionHeader: { display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, marginBottom: 12 },
   sectionTitle: { margin: 0, fontSize: 18, fontWeight: 600, letterSpacing: 0.2 },
   badge: { padding: "4px 10px", borderRadius: 999, border: "1px solid rgba(148, 163, 184, 0.4)", fontSize: 12, color: "rgba(148, 163, 184, 0.85)", whiteSpace: "nowrap" },
-  row: { display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" },
+  row: { display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" },
   button: { font: "inherit", padding: "8px 14px", borderRadius: 0, border: "1px solid rgba(84, 105, 255, 0.45)", background: "linear-gradient(135deg, rgba(84, 105, 255, 0.18), rgba(84, 105, 255, 0.05))", color: "#c7d7ff", cursor: "pointer" },
   subtleButton: { font: "inherit", padding: "5px 10px", borderRadius: 0, border: "1px solid rgba(148, 163, 184, 0.35)", background: "rgba(15, 17, 23, 0.6)", color: "rgba(226, 232, 240, 0.88)", cursor: "pointer" },
   input: { font: "inherit", padding: "8px 12px", borderRadius: 0, border: "1px solid rgba(148, 163, 184, 0.35)", background: "rgba(9, 11, 18, 0.8)", color: "inherit", minWidth: 0 },
@@ -277,8 +277,8 @@ export default function IngestPage({ systemStatus = {} }) {
           {selectedDoc ? (
             <>
               {/* Document Metadata Section */}
-              <div style={{ background: "rgba(23, 25, 35, 0.6)", border: "1px solid rgba(148, 163, 184, 0.12)", borderRadius: 0, padding: 16, marginBottom: 16 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+              <div style={{ background: "rgba(23, 25, 35, 0.6)", border: "1px solid rgba(148, 163, 184, 0.12)", borderRadius: 0, padding: 14, marginBottom: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
                   <span style={{ fontSize: 18 }}>📄</span>
                   <strong style={{ fontSize: 15, color: "#e2e8f0", flex: 1, minWidth: 0, wordBreak: "break-word" }}>
                     {previewInfo?.document_name || selectedDoc.name}
@@ -287,20 +287,20 @@ export default function IngestPage({ systemStatus = {} }) {
                 
                 {/* Statistics Grid */}
                 {previewInfo && (
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))", gap: 12, marginBottom: 12 }}>
-                    <div style={{ textAlign: "center", padding: "8px 12px", background: "rgba(84, 105, 255, 0.08)", borderRadius: 0, border: "1px solid rgba(84, 105, 255, 0.2)" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))", gap: 10, marginBottom: 10 }}>
+                    <div style={{ textAlign: "center", padding: "6px 10px", background: "rgba(84, 105, 255, 0.08)", borderRadius: 0, border: "1px solid rgba(84, 105, 255, 0.2)" }}>
                       <div style={{ fontSize: 16, fontWeight: 600, color: "#c7d7ff" }}>{prettyBytes(previewInfo.file_size)}</div>
                       <div style={{ fontSize: 11, color: "rgba(148, 163, 184, 0.85)", marginTop: 2 }}>File Size</div>
                     </div>
-                    <div style={{ textAlign: "center", padding: "8px 12px", background: "rgba(84, 105, 255, 0.08)", borderRadius: 0, border: "1px solid rgba(84, 105, 255, 0.2)" }}>
+                    <div style={{ textAlign: "center", padding: "6px 10px", background: "rgba(84, 105, 255, 0.08)", borderRadius: 0, border: "1px solid rgba(84, 105, 255, 0.2)" }}>
                       <div style={{ fontSize: 16, fontWeight: 600, color: "#c7d7ff" }}>{(previewInfo.extracted_chars || 0).toLocaleString()}</div>
                       <div style={{ fontSize: 11, color: "rgba(148, 163, 184, 0.85)", marginTop: 2 }}>Characters</div>
                     </div>
-                    <div style={{ textAlign: "center", padding: "8px 12px", background: "rgba(84, 105, 255, 0.08)", borderRadius: 0, border: "1px solid rgba(84, 105, 255, 0.2)" }}>
+                    <div style={{ textAlign: "center", padding: "6px 10px", background: "rgba(84, 105, 255, 0.08)", borderRadius: 0, border: "1px solid rgba(84, 105, 255, 0.2)" }}>
                       <div style={{ fontSize: 16, fontWeight: 600, color: "#c7d7ff" }}>{(previewInfo.total_tokens || 0).toLocaleString()}</div>
                       <div style={{ fontSize: 11, color: "rgba(148, 163, 184, 0.85)", marginTop: 2 }}>Tokens</div>
                     </div>
-                    <div style={{ textAlign: "center", padding: "8px 12px", background: "rgba(84, 105, 255, 0.08)", borderRadius: 0, border: "1px solid rgba(84, 105, 255, 0.2)" }}>
+                    <div style={{ textAlign: "center", padding: "6px 10px", background: "rgba(84, 105, 255, 0.08)", borderRadius: 0, border: "1px solid rgba(84, 105, 255, 0.2)" }}>
                       <div style={{ fontSize: 16, fontWeight: 600, color: "#c7d7ff" }}>{previewInfo.chunk_count || 0}</div>
                       <div style={{ fontSize: 11, color: "rgba(148, 163, 184, 0.85)", marginTop: 2 }}>Embeddings</div>
                     </div>
@@ -308,7 +308,7 @@ export default function IngestPage({ systemStatus = {} }) {
                 )}
                 
                 {/* Parser Controls */}
-                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                   <label style={{ ...styles.muted, fontSize: 12 }}>Parser</label>
                   <select value={parser} onChange={(e) => setParser(e.target.value)} style={{ ...styles.input, padding: "6px 10px", fontSize: 13 }}>
                     <option value="mineru">mineru</option>
@@ -324,8 +324,8 @@ export default function IngestPage({ systemStatus = {} }) {
               
               {/* Text Preview Section */}
               <div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(148, 163, 184, 0.9)", marginBottom: 8 }}>Extracted Text</div>
-                <div style={{ border: "1px solid rgba(148,163,184,0.12)", borderRadius: 0, background: "rgba(9, 11, 18, 0.72)", padding: 12, maxHeight: "40vh", overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word", overflowWrap: "anywhere", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace", fontSize: 13, lineHeight: 1.5 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(148, 163, 184, 0.9)", marginBottom: 6 }}>Extracted Text</div>
+                <div style={{ border: "1px solid rgba(148,163,184,0.12)", borderRadius: 0, background: "rgba(9, 11, 18, 0.72)", padding: 10, maxHeight: "40vh", overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word", overflowWrap: "anywhere", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace", fontSize: 13, lineHeight: 1.5 }}>
                   {preview || (previewLoading ? "Loading…" : "No text extracted.")}
                 </div>
                 {previewInfo && (
