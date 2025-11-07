@@ -57,15 +57,15 @@ The application will automatically fall back to CPU mode. Set `MINERU_DEVICE_MOD
 ## Quick Start
 
 1. **Create environment configuration**
-   - Copy `.env.example` to `.env`
-   - Configure the following variables:
-     ```
-     LLM_BASE_URL=http://llm-qwen:8000/v1
-     LLM_API_KEY=local-llm
-     LLM_MODEL=qwen/qwen3-4b-2507
-     EMBEDDING_BASE_URL=http://embed-gemma:8080/v1
-     EMBEDDING_API_KEY=local-embed
-     EMBEDDING_MODEL=text-embedding-nomic-embed-text-v1.5
+     - Copy `.env.example` to `.env`
+     - Configure the following variables:
+       ```
+        LLM_BASE_URL=http://llm:8000/v1
+        LLM_API_KEY=local-llm
+        LLM_MODEL=qwen/qwen3-4b-2507
+        EMBEDDING_BASE_URL=http://embed:8080/v1
+        EMBEDDING_API_KEY=local-embed
+        EMBEDDING_MODEL=text-embedding-nomic-embed-text-v1.5
      BACKEND_PORT=8000
      FRONTEND_PORT=5173
      DATA_DIR=/data
@@ -77,12 +77,12 @@ The application will automatically fall back to CPU mode. Set `MINERU_DEVICE_MOD
 
 2. **Stage model weights**
    - Place your GGUF files under `models/` (or update `.env` to point elsewhere). The defaults expect:
-     - `models/Qwen3-4B-Instruct-2507-GGUF/Qwen3-4B-Instruct-2507-Q8_0.gguf`
-     - `models/embeddinggemma-300m-qat-GGUF/embeddinggemma-300m-qat-Q4_0.gguf`
-   - Example download commands:
-     ```bash
-     huggingface-cli download lmstudio-community/Qwen3-4B-Instruct-2507-GQ44x4 --local-dir ./models/Qwen3-4B-Instruct-2507-GGUF
-     huggingface-cli download google/embeddinggemma-300m-qat-GGUF --local-dir ./models/embeddinggemma-300m-qat-GGUF
+     - `models/llm/Qwen3-4B-Instruct-2507-Q8_0.gguf`
+     - `models/embed/nomic-embed-text-v1.5.Q8_0.gguf`
+     - Example download commands:
+       ```bash
+       huggingface-cli download lmstudio-community/Qwen3-4B-Instruct-2507-GQ44x4 --local-dir ./models/llm --include Qwen3-4B-Instruct-2507-Q8_0.gguf
+       huggingface-cli download nomic-ai/nomic-embed-text-v1.5 --local-dir ./models/embed --include nomic-embed-text-v1.5.Q8_0.gguf
      ```
      (Any equivalent GGUF files work—just update the filenames in `.env`.)
 
@@ -100,10 +100,12 @@ The application will automatically fall back to CPU mode. Set `MINERU_DEVICE_MOD
 
 The compose stack automatically launches two CUDA-enabled `llama.cpp` servers alongside the backend:
 
-- `llm-qwen`: serves chat/completions using your Qwen3 4B GGUF build.
-- `embed-gemma`: serves embeddings using your embeddinggemma 300M GGUF build.
+- `llm`: serves chat/completions using your Qwen3 4B GGUF build.
+- `embed`: serves embeddings using your nomic-embed-text GGUF build.
 
 Both services share the custom image built from `docker/llama-cpp.Dockerfile` (Python + `llama-cpp-python[cuda]`), so they support the same command-line flags and GPU acceleration.
+
+> Note: The image now compiles `llama-cpp-python` with `-DGGML_CUDA=on -DGGML_CUDA_F16=on` inside an NVIDIA CUDA *devel* base. Rebuild the services (`docker compose build llm embed`) so the refreshed wheel runs matmuls on your 5090 instead of the CPU.
 
 Useful knobs (see `.env.example`):
 
