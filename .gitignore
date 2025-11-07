@@ -42,6 +42,8 @@ data/*
 indices/*
 !indices/.gitkeep
 sample_RAG-anything/
+models/*
+!models/.gitkeep
 
 # Misc caches
 **/.ipynb_checkpoints/

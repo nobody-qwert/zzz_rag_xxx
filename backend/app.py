@@ -286,7 +286,7 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
         await document_store.replace_chunks(doc_hash, "mineru", chunk_rows)
         chunking_time = time.perf_counter() - start_chunking
 
-        # 4) Embeddings (LM Studio)
+        # 4) Embeddings (local service)
         start_embedding = time.perf_counter()
         emb_client = EmbeddingClient()
         rows = await _compute_embeddings_for_chunks(
@@ -618,11 +618,14 @@ async def ask(req: AskRequest) -> AskResponse:
     top_k = max(1, min(req.top_k, 20))
     context_sections = scored[:top_k]
 
-    base = (os.environ.get("OPENAI_BASE_URL") or "").strip()
-    key = (os.environ.get("OPENAI_API_KEY") or "").strip()
+    base = (os.environ.get("LLM_BASE_URL") or os.environ.get("OPENAI_BASE_URL") or "").strip()
+    key = (os.environ.get("LLM_API_KEY") or os.environ.get("OPENAI_API_KEY") or "").strip()
     model = (os.environ.get("LLM_MODEL") or "").strip()
     if not base or not key or not model:
-        raise HTTPException(status_code=500, detail="OPENAI_BASE_URL, OPENAI_API_KEY, and LLM_MODEL must be set")
+        raise HTTPException(
+            status_code=500,
+            detail="LLM_BASE_URL/LLM_API_KEY (or OPENAI_* fallbacks) and LLM_MODEL must be set",
+        )
 
     prompt_token_limit = min(
         max(512, CHAT_CONTEXT_WINDOW - CHAT_COMPLETION_RESERVE),
@@ -769,8 +772,8 @@ async def ready() -> Dict[str, bool]:
 @app.post("/warmup")
 async def warmup() -> Dict[str, Any]:
     # Minimal LLM warmup by sending a short prompt
-    base = (os.environ.get("OPENAI_BASE_URL") or "").strip()
-    key = (os.environ.get("OPENAI_API_KEY") or "").strip()
+    base = (os.environ.get("LLM_BASE_URL") or os.environ.get("OPENAI_BASE_URL") or "").strip()
+    key = (os.environ.get("LLM_API_KEY") or os.environ.get("OPENAI_API_KEY") or "").strip()
     model = (os.environ.get("LLM_MODEL") or "").strip()
     if not base or not key or not model:
         return {"warmup_complete": False, "error": "LLM env missing"}

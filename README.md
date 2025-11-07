@@ -4,7 +4,7 @@ This is a GPU-ready RAG ingestion demo that:
 - Extracts text with PyMuPDF (fast path)
 - Extracts rich text/markdown with MinerU (GPU if available)
 - Chunks MinerU text (500 tokens, 100 overlap)
-- Computes embeddings using an LM Studio OpenAI-compatible endpoint
+- Computes embeddings using a local llama.cpp OpenAI-compatible endpoint
 - Stores documents, extractions, chunks, and embeddings in SQLite
 - Exposes a FastAPI backend compatible with the rag_test frontend APIs
 
@@ -60,10 +60,12 @@ The application will automatically fall back to CPU mode. Set `MINERU_DEVICE_MOD
    - Copy `.env.example` to `.env`
    - Configure the following variables:
      ```
-     OPENAI_BASE_URL=http://host:1234/v1
-     OPENAI_API_KEY=lm-studio
-     LLM_MODEL=your-model-name
-     EMBEDDING_MODEL=text-embedding-3-small
+     LLM_BASE_URL=http://llm-qwen:8000/v1
+     LLM_API_KEY=local-llm
+     LLM_MODEL=qwen/qwen3-4b-2507
+     EMBEDDING_BASE_URL=http://embed-gemma:8080/v1
+     EMBEDDING_API_KEY=local-embed
+     EMBEDDING_MODEL=text-embedding-nomic-embed-text-v1.5
      BACKEND_PORT=8000
      FRONTEND_PORT=5173
      DATA_DIR=/data
@@ -71,14 +73,60 @@ The application will automatically fall back to CPU mode. Set `MINERU_DEVICE_MOD
      MINERU_DEVICE_MODE=auto  # or cuda/cpu
      ```
 
-2. **Build and run**
+   These URLs match the service names defined in `docker-compose.yml`. When the backend needs to reach the models from outside Docker, point `LLM_BASE_URL` / `EMBEDDING_BASE_URL` to the host ports instead (for example, `http://localhost:8010/v1` and `http://localhost:8011/v1`).
+
+2. **Stage model weights**
+   - Place your GGUF files under `models/` (or update `.env` to point elsewhere). The defaults expect:
+     - `models/Qwen3-4B-Instruct-2507-GGUF/Qwen3-4B-Instruct-2507-Q8_0.gguf`
+     - `models/embeddinggemma-300m-qat-GGUF/embeddinggemma-300m-qat-Q4_0.gguf`
+   - Example download commands:
+     ```bash
+     huggingface-cli download lmstudio-community/Qwen3-4B-Instruct-2507-GQ44x4 --local-dir ./models/Qwen3-4B-Instruct-2507-GGUF
+     huggingface-cli download google/embeddinggemma-300m-qat-GGUF --local-dir ./models/embeddinggemma-300m-qat-GGUF
+     ```
+     (Any equivalent GGUF files work—just update the filenames in `.env`.)
+
+3. **Build and run**
    ```bash
    docker compose up --build
    ```
+   The first build also creates the CUDA-enabled llama.cpp image defined in `docker/llama-cpp.Dockerfile`, so expect a longer initial build while Python dependencies (llama-cpp-python + uvicorn) install.
 
-3. **Access the UI**
+4. **Access the UI**
    - Open your browser to: `http://localhost:5173` (or your configured FRONTEND_PORT)
    - The UI proxies `/api` requests to the backend service
+
+## Local LLM + Embedding Services
+
+The compose stack automatically launches two CUDA-enabled `llama.cpp` servers alongside the backend:
+
+- `llm-qwen`: serves chat/completions using your Qwen3 4B GGUF build.
+- `embed-gemma`: serves embeddings using your embeddinggemma 300M GGUF build.
+
+Both services share the custom image built from `docker/llama-cpp.Dockerfile` (Python + `llama-cpp-python[cuda]`), so they support the same command-line flags and GPU acceleration.
+
+Useful knobs (see `.env.example`):
+
+- `LOCAL_QWEN_MODEL_DIR` / `LOCAL_QWEN_MODEL_FILE`
+- `LOCAL_EMBED_MODEL_DIR` / `LOCAL_EMBED_MODEL_FILE`
+- `LLM_CONTEXT_SIZE` (default 10k tokens)
+- `EMBED_CONTEXT_SIZE` (default 2k tokens)
+- `LLM_HOST_PORT` / `EMBED_HOST_PORT` (default 8010/8011)
+- `LLM_API_KEY` / `EMBEDDING_API_KEY` (shared secrets for the OpenAI-compatible endpoints)
+
+Use these curl commands to verify the services after `docker compose up`:
+
+```bash
+curl http://localhost:${LLM_HOST_PORT:-8010}/v1/models -H "Authorization: Bearer ${LLM_API_KEY:-local-llm}"
+curl http://localhost:${LLM_HOST_PORT:-8010}/v1/chat/completions \
+  -H "Authorization: Bearer ${LLM_API_KEY:-local-llm}" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"qwen/qwen3-4b-2507","messages":[{"role":"user","content":"Say hi"}]}'
+curl http://localhost:${EMBED_HOST_PORT:-8011}/v1/embeddings \
+  -H "Authorization: Bearer ${EMBEDDING_API_KEY:-local-embed}" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"text-embedding-nomic-embed-text-v1.5","input":"embed me"}'
+```
 
 ## Performance Notes
 
@@ -152,4 +200,4 @@ Endpoints
 What the chat uses
 - Retrieval: cosine similarity over embeddings stored in SQLite (per-chunk)
 - Context: top-k chunk texts (k is configurable on the request)
-- Generation: LM Studio via OpenAI-compatible chat API (LLM_MODEL)
+- Generation: local llama.cpp OpenAI-compatible chat API (LLM_MODEL)

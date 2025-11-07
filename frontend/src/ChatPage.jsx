@@ -207,13 +207,13 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
 
         {warmingUp && !llmReady && (
           <div style={{ ...styles.muted, background: "rgba(250, 204, 21, 0.12)", border: "1px solid rgba(250, 204, 21, 0.24)", padding: 12, borderRadius: 0 }}>
-            🔥 Warming up LM Studio model... Please wait.
+            🔥 Warming up the local LLM... Please wait.
           </div>
         )}
 
         <div style={styles.messages} ref={messagesBodyRef}>
           {warmingUp && !warmedUp ? (
-            <div style={styles.muted}>🔥 Initializing LM Studio model for first use. This may take a moment...</div>
+            <div style={styles.muted}>🔥 Initializing the local LLM for first use. This may take a moment...</div>
           ) : messages.length === 0 ? (
             <div style={styles.muted}>{warmedUp ? "✅ Ready! Ask a question to get started." : "Ask a question to get started."}</div>
           ) : (

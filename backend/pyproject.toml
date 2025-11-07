@@ -1,7 +1,7 @@
 [project]
 name = "rag-mineru"
 version = "0.1.0"
-description = "GPU-ready RAG ingestion: PyMuPDF + MinerU + LM Studio embeddings"
+description = "GPU-ready RAG ingestion: PyMuPDF + MinerU + local llama.cpp embeddings"
 requires-python = ">=3.10"
 dependencies = [
   "fastapi>=0.110",

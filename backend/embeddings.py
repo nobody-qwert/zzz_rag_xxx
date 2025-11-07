@@ -6,18 +6,24 @@ from typing import List
 import numpy as np
 
 
+def _get_embedding_env(name: str, fallback: str = "") -> str:
+    return (os.environ.get(name) or fallback).strip()
+
+
 class EmbeddingClient:
     def __init__(self) -> None:
-        base = (os.environ.get("OPENAI_BASE_URL") or "").strip()
-        key = (os.environ.get("OPENAI_API_KEY") or "").strip()
+        base = _get_embedding_env("EMBEDDING_BASE_URL", _get_embedding_env("OPENAI_BASE_URL"))
+        key = _get_embedding_env("EMBEDDING_API_KEY", _get_embedding_env("OPENAI_API_KEY"))
         model = (os.environ.get("EMBEDDING_MODEL") or "text-embedding-3-small").strip()
         if not base or not key or not model:
-            raise RuntimeError("OPENAI_BASE_URL, OPENAI_API_KEY, and EMBEDDING_MODEL must be set")
+            raise RuntimeError(
+                "EMBEDDING_BASE_URL/EMBEDDING_API_KEY (or OPENAI_* fallbacks) and EMBEDDING_MODEL must be set"
+            )
         self.base = base
         self.key = key
         self.model = model
 
-        # dimension hints for LM Studio/OpenAI models
+        # dimension hints for popular OpenAI-compatible models
         ml = model.lower()
         if "text-embedding-3-large" in ml:
             self.dim = 3072
@@ -54,4 +60,3 @@ class EmbeddingClient:
             v = np.asarray(item.embedding, dtype=np.float32)  # type: ignore[attr-defined]
             out.append(v)
         return out
-
