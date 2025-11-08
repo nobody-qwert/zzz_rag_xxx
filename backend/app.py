@@ -44,7 +44,13 @@ MINERU_WARMUP_ON_STARTUP = (os.environ.get("MINERU_WARMUP_ON_STARTUP") or "false
 CHAT_CONTEXT_WINDOW = int(os.environ.get("CHAT_CONTEXT_WINDOW", "10000") or 10000)
 CHAT_COMPLETION_MAX_TOKENS = int(os.environ.get("CHAT_COMPLETION_MAX_TOKENS", "2048") or 2048)
 CHAT_COMPLETION_RESERVE = int(os.environ.get("CHAT_COMPLETION_RESERVE", str(CHAT_COMPLETION_MAX_TOKENS)) or CHAT_COMPLETION_MAX_TOKENS)
-SYSTEM_PROMPT = "You are a helpful assistant for RAG."
+MIN_CONTEXT_SIMILARITY = float(os.environ.get("MIN_CONTEXT_SIMILARITY", "0.35") or 0.35)
+NO_CONTEXT_RESPONSE = "I couldn't find relevant information for that in the available documents."
+SYSTEM_PROMPT = (
+    "You are a retrieval-augmented assistant. Answer strictly using the provided document snippets and cite them as [source N]. "
+    "When the snippets contain only partial information, summarize what they do cover and note any gaps; do not invent details. "
+    "Only state that no relevant information exists when no snippets are supplied."
+)
 CONTINUE_PROMPT = (
     "Continue the previous answer to the user's last question. "
     "Resume exactly where it stopped without repeating earlier content."
@@ -618,7 +624,8 @@ async def ask(req: AskRequest) -> AskResponse:
     scored.sort(key=lambda x: x["score"], reverse=True)
 
     top_k = max(1, min(req.top_k, 20))
-    context_sections = scored[:top_k]
+    filtered_sections = [s for s in scored if s["score"] >= MIN_CONTEXT_SIMILARITY]
+    context_sections = filtered_sections[:top_k]
 
     base = (os.environ.get("LLM_BASE_URL") or "").strip()
     key = (os.environ.get("LLM_API_KEY") or "").strip()
@@ -653,14 +660,17 @@ async def ask(req: AskRequest) -> AskResponse:
     while True:
         context_text = _render_context(context_sections)
         context_content = (
-            "Use the following retrieved document snippets as context. Cite them as [source N].\n"
-            + (context_text if context_text else "(No retrieved snippets. Rely on prior conversation.)")
+            "Use only the following retrieved document snippets as context. "
+            "Cite them as [source N].\n"
+            + (context_text if context_text else "(No retrieved snippets available.)")
+        )
+        combined_user_message = (
+            f"{context_content}\n\nQuestion:\n{user_message_for_llm}"
         )
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             *history_for_prompt,
-            {"role": "system", "content": context_content},
-            {"role": "user", "content": user_message_for_llm},
+            {"role": "user", "content": combined_user_message},
         ]
         prompt_tokens = estimate_messages_tokens(messages, model=model)
         if prompt_tokens <= prompt_token_limit:
@@ -691,24 +701,28 @@ async def ask(req: AskRequest) -> AskResponse:
 
     answer = ""
     finish_reason: Optional[str] = None
-    try:
-        from openai import AsyncOpenAI  # type: ignore
+    if not context_sections:
+        answer = NO_CONTEXT_RESPONSE
+        finish_reason = "no_context"
+    else:
+        try:
+            from openai import AsyncOpenAI  # type: ignore
 
-        client = AsyncOpenAI(base_url=base, api_key=key)
-        resp = await client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=0.2,
-            max_tokens=CHAT_COMPLETION_MAX_TOKENS,
-            stream=False,
-        )
-        if not resp.choices:
-            raise HTTPException(status_code=500, detail="LLM returned no choices")
-        choice = resp.choices[0]
-        answer = (choice.message.content or "").strip()
-        finish_reason = getattr(choice, "finish_reason", None)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"LLM call failed: {exc}")
+            client = AsyncOpenAI(base_url=base, api_key=key)
+            resp = await client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=0.2,
+                max_tokens=CHAT_COMPLETION_MAX_TOKENS,
+                stream=False,
+            )
+            if not resp.choices:
+                raise HTTPException(status_code=500, detail="LLM returned no choices")
+            choice = resp.choices[0]
+            answer = (choice.message.content or "").strip()
+            finish_reason = getattr(choice, "finish_reason", None)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"LLM call failed: {exc}")
 
     sources: List[Dict[str, Any]] = []
     for entry in context_sections:
