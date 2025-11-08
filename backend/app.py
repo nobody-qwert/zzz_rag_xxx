@@ -182,6 +182,8 @@ async def _compute_embeddings_for_chunks(chunks: List[Dict[str, Any]], client: E
     vectors = await client.embed_batch(texts)
     if len(vectors) != len(chunks):
         raise RuntimeError("Embedding result size mismatch")
+    if client.dim is None:
+        raise RuntimeError("Embedding dimension is unknown after embedding call")
 
     rows: List[EmbeddingRow] = []
     for c, v in zip(chunks, vectors):
@@ -618,13 +620,13 @@ async def ask(req: AskRequest) -> AskResponse:
     top_k = max(1, min(req.top_k, 20))
     context_sections = scored[:top_k]
 
-    base = (os.environ.get("LLM_BASE_URL") or os.environ.get("OPENAI_BASE_URL") or "").strip()
-    key = (os.environ.get("LLM_API_KEY") or os.environ.get("OPENAI_API_KEY") or "").strip()
+    base = (os.environ.get("LLM_BASE_URL") or "").strip()
+    key = (os.environ.get("LLM_API_KEY") or "").strip()
     model = (os.environ.get("LLM_MODEL") or "").strip()
     if not base or not key or not model:
         raise HTTPException(
             status_code=500,
-            detail="LLM_BASE_URL/LLM_API_KEY (or OPENAI_* fallbacks) and LLM_MODEL must be set",
+            detail="LLM_BASE_URL, LLM_API_KEY, and LLM_MODEL must be set",
         )
 
     prompt_token_limit = min(
@@ -772,8 +774,8 @@ async def ready() -> Dict[str, bool]:
 @app.post("/warmup")
 async def warmup() -> Dict[str, Any]:
     # Minimal LLM warmup by sending a short prompt
-    base = (os.environ.get("LLM_BASE_URL") or os.environ.get("OPENAI_BASE_URL") or "").strip()
-    key = (os.environ.get("LLM_API_KEY") or os.environ.get("OPENAI_API_KEY") or "").strip()
+    base = (os.environ.get("LLM_BASE_URL") or "").strip()
+    key = (os.environ.get("LLM_API_KEY") or "").strip()
     model = (os.environ.get("LLM_MODEL") or "").strip()
     if not base or not key or not model:
         return {"warmup_complete": False, "error": "LLM env missing"}
