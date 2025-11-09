@@ -35,14 +35,15 @@ const styles = {
   feedback: { marginTop: 10, fontSize: 13, color: "rgba(148, 163, 184, 0.85)" },
   docs: { maxHeight: "55vh", overflow: "auto", border: "1px solid rgba(148, 163, 184, 0.12)", borderRadius: 0, padding: 12, background: "rgba(9, 11, 18, 0.75)" },
   listItem: { padding: "14px 12px", borderRadius: 0, background: "rgba(23, 25, 35, 0.75)", border: "1px solid rgba(148, 163, 184, 0.08)", marginBottom: 10, display: "flex", flexDirection: "column", gap: 8 },
-  docTitleRow: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 },
+  docTitleRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 },
   docTitleActions: { display: "flex", alignItems: "center", gap: 8, flexShrink: 0 },
   docName: { fontSize: 15, fontWeight: 600, color: "rgba(226, 232, 240, 0.95)", margin: 0, wordBreak: "break-word" },
   docStatusPill: { fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, padding: "2px 8px", borderRadius: 999, border: "1px solid rgba(148, 163, 184, 0.22)", color: "rgba(148, 163, 184, 0.85)" },
   docMetaRow: { display: "flex", flexWrap: "wrap", gap: 12, fontSize: 12, color: "rgba(148, 163, 184, 0.9)", marginTop: 4 },
   docMetaItem: { whiteSpace: "nowrap" },
   docActions: { display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 },
-  dangerIconButton: { font: "inherit", fontSize: 16, lineHeight: 1, width: 26, height: 26, borderRadius: 20, border: "1px solid rgba(239, 68, 68, 0.7)", background: "rgba(69, 10, 10, 0.65)", color: "rgba(248, 250, 252, 0.9)", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0 },
+  docPreviewButton: { font: "inherit", fontSize: 13, padding: "4px 12px", borderRadius: 999, border: "1px solid rgba(148, 163, 184, 0.35)", background: "rgba(84, 105, 255, 0.15)", color: "rgba(226, 232, 240, 0.98)", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" },
+  dangerIconButton: { font: "inherit", fontSize: 16, lineHeight: 1, width: 16, height: 16, borderRadius: 0, border: "1px solid rgba(239, 68, 68, 0.7)", background: "rgba(69, 10, 10, 0.65)", color: "rgba(248, 250, 252, 0.9)", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0 },
   muted: { opacity: 0.75, fontSize: 13, color: "rgba(148, 163, 184, 0.8)" },
   error: { fontSize: 13, color: "#ff8f8f", marginTop: 6 },
 };
@@ -475,7 +476,7 @@ export default function IngestPage({ systemStatus = {} }) {
                       <div style={styles.docTitleActions}>
                         {canPreviewInHeader ? (
                           <button
-                            style={styles.subtleButton}
+                            style={{ ...styles.docPreviewButton, opacity: previewLoading && selectedDoc && selectedDoc.hash === d.hash ? 0.6 : 1 }}
                             onClick={() => handlePreview(d)}
                             disabled={previewLoading && selectedDoc && selectedDoc.hash === d.hash}
                             title="Preview extracted text"
