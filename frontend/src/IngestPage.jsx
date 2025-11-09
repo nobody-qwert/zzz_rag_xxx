@@ -34,13 +34,20 @@ const styles = {
   input: { font: "inherit", padding: "8px 12px", borderRadius: 0, border: "1px solid rgba(148, 163, 184, 0.35)", background: "rgba(9, 11, 18, 0.8)", color: "inherit", minWidth: 0 },
   feedback: { marginTop: 10, fontSize: 13, color: "rgba(148, 163, 184, 0.85)" },
   docs: { maxHeight: "55vh", overflow: "auto", border: "1px solid rgba(148, 163, 184, 0.12)", borderRadius: 0, padding: 12, background: "rgba(9, 11, 18, 0.75)" },
-  listItem: { padding: "10px 8px", borderRadius: 0, background: "rgba(23, 25, 35, 0.75)", border: "1px solid rgba(148, 163, 184, 0.08)", marginBottom: 6 },
+  listItem: { padding: "14px 12px", borderRadius: 0, background: "rgba(23, 25, 35, 0.75)", border: "1px solid rgba(148, 163, 184, 0.08)", marginBottom: 10, display: "flex", flexDirection: "column", gap: 8 },
+  docTitleRow: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 },
+  docName: { fontSize: 15, fontWeight: 600, color: "rgba(226, 232, 240, 0.95)", margin: 0, wordBreak: "break-word" },
+  docStatusPill: { fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, padding: "2px 8px", borderRadius: 999, border: "1px solid rgba(148, 163, 184, 0.22)", color: "rgba(148, 163, 184, 0.85)" },
+  docMetaRow: { display: "flex", flexWrap: "wrap", gap: 12, fontSize: 12, color: "rgba(148, 163, 184, 0.9)", marginTop: 4 },
+  docMetaItem: { whiteSpace: "nowrap" },
+  docActions: { display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 },
   muted: { opacity: 0.75, fontSize: 13, color: "rgba(148, 163, 184, 0.8)" },
   error: { fontSize: 13, color: "#ff8f8f", marginTop: 6 },
 };
 
 const FALLBACK_PARSER = "mineru";
 const FALLBACK_PARSER_OPTIONS = [FALLBACK_PARSER, "pymupdf"];
+const IN_PROGRESS_STATUSES = new Set(["processing", "ingesting", "queued", "pending", "running", "parsing", "uploading"]);
 
 export default function IngestPage({ systemStatus = {} }) {
   const api = useMemo(() => ({
@@ -410,15 +417,44 @@ export default function IngestPage({ systemStatus = {} }) {
                 const perf = d.performance;
                 const hasPerf = perf && perf.total_time_sec != null;
                 const isExpanded = expandedPerf.has(d.hash);
+                const statusLabel = String(d.status || "pending").trim().toLowerCase();
+                const isErrored = statusLabel === "error";
+                const isInProgress = IN_PROGRESS_STATUSES.has(statusLabel);
+                const canPreviewInHeader = Boolean(d.hash && !isErrored && !isInProgress);
+                const showStatusPill = !canPreviewInHeader;
+                const showRetry = isErrored && Boolean(d.hash);
                 
                 return (
                   <li key={d.hash || d.stored_name || d.name} style={styles.listItem}>
-                    <div title={d.path}>
-                      <strong>{d.name}</strong>{" "}
-                      <span style={styles.muted}>{`${prettyBytes(d.size)} · ${(d.status || "unknown").toLowerCase()}${d.hash ? ` · ${shortHash(d.hash)}` : ""}`}</span>
-                      {d.hash && (<button style={{ ...styles.subtleButton, marginLeft: 8 }} onClick={() => handlePreview(d)} disabled={previewLoading && selectedDoc && selectedDoc.hash === d.hash} title="Preview extracted text">{previewLoading && selectedDoc && selectedDoc.hash === d.hash ? "Loading…" : "Preview"}</button>)}
-                      {String(d.status || "").toLowerCase() === "error" && d.hash && (<button style={{ ...styles.subtleButton, marginLeft: 8 }} onClick={() => handleRetry(d.hash)} disabled={retryingHash === d.hash}>{retryingHash === d.hash ? "Retrying…" : "Retry"}</button>)}
+                    <div style={styles.docTitleRow} title={d.path}>
+                      <div style={{ flex: 1 }}>
+                        <div style={styles.docName}>{d.name || d.stored_name || "Untitled document"}</div>
+                      </div>
+                      {canPreviewInHeader ? (
+                        <button
+                          style={styles.subtleButton}
+                          onClick={() => handlePreview(d)}
+                          disabled={previewLoading && selectedDoc && selectedDoc.hash === d.hash}
+                          title="Preview extracted text"
+                        >
+                          {previewLoading && selectedDoc && selectedDoc.hash === d.hash ? "Loading…" : "Preview"}
+                        </button>
+                      ) : showStatusPill ? (
+                        <span style={styles.docStatusPill}>{statusLabel.toUpperCase()}</span>
+                      ) : null}
                     </div>
+
+                    <div style={styles.docMetaRow}>
+                      <span style={styles.docMetaItem}>
+                        <span style={{ opacity: 0.65 }}>Size:</span> {prettyBytes(d.size)}
+                      </span>
+                      {d.hash && (
+                        <span style={styles.docMetaItem}>
+                          <span style={{ opacity: 0.65 }}>Hash:</span> {shortHash(d.hash)}
+                        </span>
+                      )}
+                    </div>
+
                     {d.last_ingested_at && (<div style={styles.muted}>Last ingested {formatDate(d.last_ingested_at)}</div>)}
                     {d.error && (<div style={styles.error}>Error: {d.error}</div>)}
                     
@@ -471,6 +507,18 @@ export default function IngestPage({ systemStatus = {} }) {
                             )}
                           </div>
                         )}
+                      </div>
+                    )}
+
+                    {showRetry && (
+                      <div style={styles.docActions}>
+                        <button
+                          style={styles.subtleButton}
+                          onClick={() => handleRetry(d.hash)}
+                          disabled={retryingHash === d.hash}
+                        >
+                          {retryingHash === d.hash ? "Retrying…" : "Retry"}
+                        </button>
                       </div>
                     )}
                   </li>
