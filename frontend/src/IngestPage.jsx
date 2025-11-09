@@ -42,8 +42,8 @@ const styles = {
   docMetaRow: { display: "flex", flexWrap: "wrap", gap: 12, fontSize: 12, color: "rgba(148, 163, 184, 0.9)", marginTop: 4 },
   docMetaItem: { whiteSpace: "nowrap" },
   docActions: { display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 },
-  docPreviewButton: { font: "inherit", fontSize: 13, padding: "4px 12px", borderRadius: 999, border: "1px solid rgba(148, 163, 184, 0.35)", background: "rgba(84, 105, 255, 0.15)", color: "rgba(226, 232, 240, 0.98)", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" },
-  dangerIconButton: { font: "inherit", fontSize: 16, lineHeight: 1, width: 24, height: 24, borderRadius: 0, border: "1px solid rgba(239, 68, 68, 0.7)", background: "rgba(69, 10, 10, 0.65)", color: "rgba(248, 250, 252, 0.9)", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0 },
+  docPreviewButton: { font: "inherit", fontSize: 13, padding: "3px 10px", borderRadius: 999, border: "1px solid rgba(148, 163, 184, 0.35)", background: "rgba(84, 105, 255, 0.15)", color: "rgba(226, 232, 240, 0.98)", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" },
+  dangerIconButton: { font: "inherit", fontSize: 16, lineHeight: 1, width: 20, height: 20, borderRadius: 0, border: "1px solid rgba(239, 68, 68, 0.7)", background: "rgba(69, 10, 10, 0.65)", color: "rgba(248, 250, 252, 0.9)", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0 },
   docIngestRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 6, fontSize: 12, color: "rgba(148, 163, 184, 0.85)" },
   docIngestInfo: { flex: 1, lineHeight: 1.4 },
   docPerfToggle: { font: "inherit", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 4, padding: 0, border: "none", background: "transparent", color: "rgba(148, 163, 184, 0.75)", cursor: "pointer" },
@@ -523,8 +523,7 @@ export default function IngestPage({ systemStatus = {} }) {
                             {showPerf && (
                               <>
                                 {" • "}
-                                <span style={{ fontSize: 11 }}>⚡</span>
-                                <span style={{ fontWeight: 600, marginLeft: 4 }}>{perf.total_time_sec.toFixed(1)}s</span>
+                                <span style={{ fontWeight: 600 }}>{perf.total_time_sec.toFixed(1)}s</span>
                               </>
                             )}
                           </span>
