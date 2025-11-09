@@ -25,9 +25,9 @@ function mergeSources(existing = [], incoming = []) {
 }
 
 const styles = {
-  page: { display: "flex", flexWrap: "wrap", gap: 18, alignItems: "stretch" },
-  chatCard: { flex: "2 1 540px", border: "1px solid rgba(148, 163, 184, 0.18)", borderRadius: 0, padding: "16px 18px", background: "rgba(13, 16, 24, 0.92)", boxShadow: "0 16px 28px rgba(2, 6, 23, 0.32)", display: "grid", gap: 12, alignContent: "start" },
-  sideCard: { flex: "1 1 320px", border: "1px solid rgba(148, 163, 184, 0.18)", borderRadius: 0, padding: "16px 16px", background: "rgba(13, 16, 24, 0.88)", boxShadow: "0 12px 24px rgba(2, 6, 23, 0.3)", display: "grid", gap: 10, alignContent: "start", maxHeight: "calc(100vh - 220px)", overflow: "hidden" },
+  page: { display: "flex", flexWrap: "wrap", gap: 18, alignItems: "stretch", width: "100%", minHeight: "calc(100vh - 32px)" },
+  chatCard: { flex: "2 1 540px", border: "1px solid rgba(148, 163, 184, 0.18)", borderRadius: 0, padding: "16px 18px", background: "rgba(13, 16, 24, 0.92)", boxShadow: "0 16px 28px rgba(2, 6, 23, 0.32)", display: "flex", flexDirection: "column", gap: 12, minHeight: "100%" },
+  sideCard: { flex: "1 1 320px", border: "1px solid rgba(148, 163, 184, 0.18)", borderRadius: 0, padding: "16px 16px", background: "rgba(13, 16, 24, 0.88)", boxShadow: "0 12px 24px rgba(2, 6, 23, 0.3)", display: "grid", gridTemplateRows: "auto auto 1fr", gap: 10, alignContent: "stretch", minHeight: "100%" },
   sectionHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" },
   sectionTitle: { margin: 0, fontSize: 20, fontWeight: 600, letterSpacing: 0.25 },
   badge: { padding: "6px 12px", borderRadius: 999, border: "1px solid rgba(148, 163, 184, 0.35)", fontSize: 12, color: "rgba(148, 163, 184, 0.85)", whiteSpace: "nowrap" },
@@ -35,7 +35,7 @@ const styles = {
   subtleButton: { font: "inherit", fontSize: 13, padding: "4px 10px", borderRadius: 0, border: "1px solid rgba(148, 163, 184, 0.35)", background: "rgba(15, 17, 23, 0.6)", color: "rgba(226, 232, 240, 0.9)", cursor: "pointer" },
   input: { font: "inherit", padding: "8px 12px", borderRadius: 0, border: "1px solid rgba(148, 163, 184, 0.35)", background: "rgba(9, 11, 18, 0.82)", color: "inherit", flex: 1, minWidth: 0 },
   muted: { fontSize: 13, color: "rgba(148, 163, 184, 0.78)" },
-  messages: { minHeight: 240, maxHeight: "48vh", overflow: "auto", border: "1px solid rgba(148, 163, 184, 0.12)", borderRadius: 0, padding: 12, background: "rgba(9, 11, 18, 0.78)", whiteSpace: "pre-wrap", display: "flex", flexDirection: "column", gap: 8 },
+  messages: { flex: 1, minHeight: 240, minWidth: 0, overflow: "auto", border: "1px solid rgba(148, 163, 184, 0.12)", borderRadius: 0, padding: 12, background: "rgba(9, 11, 18, 0.78)", whiteSpace: "pre-wrap", display: "flex", flexDirection: "column", gap: 8 },
   messageList: { display: "flex", flexDirection: "column", gap: 8 },
   userBubble: { alignSelf: "flex-end", background: "rgba(59, 130, 246, 0.18)", borderRadius: 0, padding: 10, maxWidth: "85%" },
   assistantBubble: { alignSelf: "flex-start", background: "rgba(84, 105, 255, 0.12)", borderRadius: 0, padding: 10, maxWidth: "95%", lineHeight: 1.5 },
