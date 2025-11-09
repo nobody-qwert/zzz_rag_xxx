@@ -13,51 +13,6 @@ async function readJsonSafe(res) {
 import IngestPage from "./IngestPage";
 import ChatPage from "./ChatPage";
 
-function NavigationBar({ systemStatus, currentPath, onNavigate, statusLabel }) {
-  const canNavigateToChat = systemStatus.ready && systemStatus.docs_count > 0 && !systemStatus.has_running_jobs;
-  const isOnChat = currentPath === "/chat";
-  const isOnIngest = currentPath === "/ingest";
-  return (
-    <header style={styles.headerShell}>
-      <div style={styles.topRow}>
-        <div style={styles.topLeft}>
-          <div style={styles.navButtonGroup}>
-            <button
-              onClick={() => onNavigate("/ingest")}
-              disabled={isOnChat && systemStatus.asking}
-              style={{
-                ...styles.navButton,
-                background: isOnIngest ? "rgba(84,105,255,0.18)" : "transparent",
-                opacity: (isOnChat && systemStatus.asking) ? 0.5 : 1,
-              }}
-            >
-              Ingest Docs
-            </button>
-            {canNavigateToChat && (
-              <button
-                onClick={() => onNavigate("/chat")}
-                style={{
-                  ...styles.navButton,
-                  background: isOnChat ? "rgba(84,105,255,0.18)" : "transparent",
-                }}
-              >
-                Chat
-              </button>
-            )}
-          </div>
-        </div>
-        <div style={styles.topCenter}>
-          <h1 style={styles.appTitle}>RAG MinerU</h1>
-          <span style={styles.tagline}>Upload documents, then ask questions</span>
-        </div>
-        <div style={styles.topRight}>
-          <div style={styles.statusPill}>{statusLabel}</div>
-        </div>
-      </div>
-    </header>
-  );
-}
-
 function AppContent() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -106,12 +61,6 @@ function AppContent() {
     return () => interval && clearInterval(interval);
   }, [api.status]);
 
-  const handleNavigate = (path) => {
-    if (path === "/chat" && (!systemStatus.ready || systemStatus.has_running_jobs)) return;
-    if (location.pathname === "/chat" && systemStatus.asking) return;
-    navigate(path);
-  };
-
   useEffect(() => {
     if (location.pathname === "/chat" && (!systemStatus.ready || systemStatus.has_running_jobs || systemStatus.docs_count === 0)) {
       navigate("/ingest", { replace: true });
@@ -119,17 +68,9 @@ function AppContent() {
   }, [location.pathname, systemStatus.ready, systemStatus.has_running_jobs, systemStatus.docs_count, navigate]);
 
   const updateAskingStatus = (asking) => setSystemStatus(prev => ({ ...prev, asking }));
-  const statusLabel = systemStatus.has_running_jobs ? "Processing" : systemStatus.ready ? "Ready" : "Standby";
 
   return (
     <div style={styles.appShell}>
-      <NavigationBar
-        systemStatus={systemStatus}
-        currentPath={location.pathname}
-        onNavigate={handleNavigate}
-        statusLabel={statusLabel}
-      />
-
       <main style={styles.main}>
         <div style={styles.content}>
           <Routes>
@@ -155,17 +96,6 @@ export default function App() {
 
 const styles = {
   appShell: { minHeight: "100vh", display: "flex", flexDirection: "column", background: "radial-gradient(circle at top left, rgba(45,55,95,0.35), rgba(15,17,23,0.98) 55%)", color: "#f4f6fb" },
-  headerShell: { borderBottom: "1px solid rgba(148,163,184,0.16)", background: "rgba(15,17,23,0.92)", backdropFilter: "blur(12px)" },
-  topRow: { maxWidth: "1200px", margin: "0 auto", padding: "14px 24px", display: "grid", gridTemplateColumns: "auto 1fr auto", alignItems: "center", gap: 18 },
-  topLeft: { display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" },
-  navButtonGroup: { display: "flex", gap: 10, flexWrap: "wrap" },
-  topCenter: { textAlign: "center" },
-  topRight: { display: "flex", justifyContent: "flex-end", alignItems: "center" },
-  appTitle: { margin: 0, fontSize: 22, fontWeight: 600, letterSpacing: 0.3 },
-  tagline: { display: "block", fontSize: 14, color: "rgba(148,163,184,0.82)", marginTop: 4 },
-  statusPill: { padding: "6px 12px", borderRadius: 999, border: "1px solid rgba(56,189,248,0.35)", color: "rgba(125,211,252,0.92)", fontSize: 12, letterSpacing: 0.5, textTransform: "uppercase" },
-  main: { flex: 1, padding: "24px 20px 36px" },
+  main: { flex: 1, padding: "36px 20px 48px" },
   content: { maxWidth: "1200px", margin: "0 auto", width: "100%", padding: "0 4px" },
-  navButton: { font: "inherit", fontSize: 14, padding: "6px 13px", borderRadius: 0, border: "1px solid rgba(84,105,255,0.4)", background: "transparent", color: "#c7d7ff", textDecoration: "none", transition: "background 0.2s ease, border 0.2s ease" },
-  muted: { fontSize: 13, color: "rgba(148,163,184,0.8)" },
 };

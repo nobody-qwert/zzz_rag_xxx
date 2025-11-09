@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 async function readJsonSafe(res) {
   const ct = (res.headers.get("content-type") || "").toLowerCase();
@@ -59,6 +60,7 @@ const IN_PROGRESS_STATUSES = new Set(["processing", "ingesting", "queued", "pend
 const COMPLETED_STATUSES = new Set(["processed", "done", "completed", "ready"]);
 
 export default function IngestPage({ systemStatus = {} }) {
+  const navigate = useNavigate();
   const api = useMemo(() => ({
     ingest: "/api/ingest",
     docs: "/api/documents",
@@ -91,6 +93,16 @@ export default function IngestPage({ systemStatus = {} }) {
   useEffect(() => {
     selectedDocRef.current = selectedDoc;
   }, [selectedDoc]);
+
+  const readyDocCount = Number(systemStatus.docs_count || 0);
+  const canOpenChat = systemStatus.ready && !systemStatus.has_running_jobs && readyDocCount > 0;
+  const chatDisabledReason = systemStatus.has_running_jobs
+    ? "Finish processing the current jobs before chatting."
+    : !systemStatus.ready
+      ? "System is still preparing the chat experience."
+      : readyDocCount === 0
+        ? "Ingest at least one document to unlock chat."
+        : "";
 
   const refreshDocs = useCallback(async () => {
     setDocsLoading(true);
@@ -348,6 +360,11 @@ export default function IngestPage({ systemStatus = {} }) {
     return () => clearInterval(id);
   }, [activeJobs, api, refreshDocs]);
 
+  const handleOpenChat = useCallback(() => {
+    if (!canOpenChat) return;
+    navigate("/chat");
+  }, [canOpenChat, navigate]);
+
   return (
     <div style={styles.page}>
       <div style={styles.leftColumn}>
@@ -501,7 +518,28 @@ export default function IngestPage({ systemStatus = {} }) {
             <h3 style={styles.sectionTitle}>Document Library</h3>
             <span style={styles.muted}>{`${systemStatus.docs_count || 0} ready / ${systemStatus.total_docs || displayDocs.length}`}</span>
           </div>
-          <button onClick={refreshDocs} disabled={docsLoading} style={{ ...styles.subtleButton, opacity: docsLoading ? 0.6 : 1 }}>{docsLoading ? "Refreshing…" : "Refresh"}</button>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+              <button
+                onClick={refreshDocs}
+                disabled={docsLoading}
+                style={{ ...styles.subtleButton, opacity: docsLoading ? 0.6 : 1 }}
+              >
+                {docsLoading ? "Refreshing…" : "Refresh"}
+              </button>
+              <button
+                onClick={handleOpenChat}
+                disabled={!canOpenChat}
+                style={{ ...styles.button, padding: "6px 14px", opacity: canOpenChat ? 1 : 0.5 }}
+                title={canOpenChat ? "Jump to chat" : chatDisabledReason}
+              >
+                Open Chat
+              </button>
+            </div>
+            {!canOpenChat && (
+              <span style={{ ...styles.muted, fontSize: 11, textAlign: "right" }}>{chatDisabledReason}</span>
+            )}
+          </div>
         </div>
         <div style={{ ...styles.docs, ...(displayDocs.length ? {} : styles.muted) }}>
           {displayDocs.length === 0 ? (
