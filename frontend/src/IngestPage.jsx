@@ -85,6 +85,12 @@ export default function IngestPage({ systemStatus = {} }) {
   const [parser, setParser] = useState(FALLBACK_PARSER);
   const [parserOptions, setParserOptions] = useState(FALLBACK_PARSER_OPTIONS);
   const [expandedPerf, setExpandedPerf] = useState(new Set());
+  const selectedDocRef = useRef(null);
+  const lastPreviewParamsRef = useRef({ parser, previewMaxChars });
+
+  useEffect(() => {
+    selectedDocRef.current = selectedDoc;
+  }, [selectedDoc]);
 
   const refreshDocs = useCallback(async () => {
     setDocsLoading(true);
@@ -253,12 +259,59 @@ export default function IngestPage({ systemStatus = {} }) {
     }
   }, [api.docs, refreshDocs, selectedDoc]);
 
-  const handlePreview = useCallback(async (doc) => {
-    if (!doc || !doc.hash) return; setSelectedDoc(doc); setPreview(""); setPreviewError(""); setPreviewInfo(null); setPreviewLoading(true);
-    try { const res = await fetch(api.previewText(doc.hash, previewMaxChars, parser)); const data = await readJsonSafe(res); if (!res.ok) throw new Error((data && (data.detail || data.error || data.raw)) || `GET preview ${res.status}`); setPreview(typeof data.preview === "string" ? data.preview : ""); setPreviewInfo({ document_name: data.document_name, file_size: data.file_size, extracted_chars: data.extracted_chars, total_tokens: data.total_tokens, chunk_count: data.chunk_count, preview_chars: data.preview_chars, truncated: !!data.truncated, parser }); }
-    catch (e) { setPreviewError(e.message || String(e)); }
-    finally { setPreviewLoading(false); }
-  }, [api, previewMaxChars, parser]);
+  const handlePreview = useCallback(async (doc, { skipSelect = false } = {}) => {
+    if (!doc || !doc.hash) return;
+
+    if (!skipSelect) {
+      setSelectedDoc(prev => (prev && prev.hash === doc.hash ? prev : doc));
+    }
+
+    setPreview("");
+    setPreviewError("");
+    setPreviewInfo(null);
+    setPreviewLoading(true);
+
+    try {
+      const res = await fetch(api.previewText(doc.hash, previewMaxChars, parser));
+      const data = await readJsonSafe(res);
+      if (!res.ok) {
+        throw new Error((data && (data.detail || data.error || data.raw)) || `GET preview ${res.status}`);
+      }
+      setPreview(typeof data.preview === "string" ? data.preview : "");
+      setPreviewInfo({
+        document_name: data.document_name,
+        file_size: data.file_size,
+        extracted_chars: data.extracted_chars,
+        total_tokens: data.total_tokens,
+        chunk_count: data.chunk_count,
+        preview_chars: data.preview_chars,
+        truncated: !!data.truncated,
+        parser,
+      });
+    } catch (e) {
+      setPreviewError(e.message || String(e));
+    } finally {
+      setPreviewLoading(false);
+    }
+  }, [api, parser, previewMaxChars]);
+
+  useEffect(() => {
+    const prev = lastPreviewParamsRef.current;
+    const hasParserChanged = prev.parser !== parser;
+    const hasMaxChanged = prev.previewMaxChars !== previewMaxChars;
+    const doc = selectedDocRef.current;
+
+    if (!doc?.hash) {
+      lastPreviewParamsRef.current = { parser, previewMaxChars };
+      return;
+    }
+    if (!hasParserChanged && !hasMaxChanged) {
+      return;
+    }
+
+    lastPreviewParamsRef.current = { parser, previewMaxChars };
+    void handlePreview(doc, { skipSelect: true });
+  }, [parser, previewMaxChars, handlePreview]);
 
   // Poll active jobs
   useEffect(() => {
@@ -415,9 +468,6 @@ export default function IngestPage({ systemStatus = {} }) {
                   </select>
                   <label style={{ ...styles.muted, fontSize: 12, marginLeft: 8 }}>Max chars</label>
                   <input type="number" min={200} max={20000} step={100} value={previewMaxChars} onChange={(e) => setPreviewMaxChars(Number(e.target.value) || 2000)} style={{ ...styles.input, width: 100, padding: "6px 10px", fontSize: 13 }} />
-                  <button style={{ ...styles.subtleButton, marginLeft: "auto" }} onClick={() => handlePreview(selectedDoc)} disabled={previewLoading}>
-                    {previewLoading ? "Refreshing…" : "Refresh"}
-                  </button>
                 </div>
               </div>
               
