@@ -42,6 +42,10 @@ const styles = {
   errorBubble: { alignSelf: "flex-start", background: "rgba(239, 68, 68, 0.12)", border: "1px solid rgba(239, 68, 68, 0.4)", borderRadius: 0, padding: 10, maxWidth: "95%" },
   messageRole: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.8, color: "rgba(148, 163, 184, 0.75)", marginBottom: 4 },
   sourcesBlock: { fontSize: 12, color: "rgba(148, 163, 184, 0.78)", marginTop: 10 },
+  sourceItem: { marginBottom: 6, paddingBottom: 6, borderBottom: "1px solid rgba(148, 163, 184, 0.08)" },
+  sourceHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" },
+  sourceToggle: { font: "inherit", fontSize: 11, padding: "4px 10px", borderRadius: 999, border: "1px solid rgba(148, 163, 184, 0.35)", background: "rgba(15, 17, 23, 0.6)", color: "rgba(226, 232, 240, 0.85)", cursor: "pointer" },
+  sourcePreview: { fontSize: 11, color: "rgba(148, 163, 184, 0.6)", fontStyle: "italic", marginTop: 4 },
   docs: { overflow: "auto", border: "1px solid rgba(148, 163, 184, 0.12)", borderRadius: 0, padding: 12, background: "rgba(9, 11, 18, 0.72)" },
   listItem: { padding: "10px 8px", borderRadius: 0, marginBottom: 6, background: "rgba(23, 25, 35, 0.7)" },
   contextBadge: { padding: "8px 14px", borderRadius: 14, border: "1px solid rgba(148, 163, 184, 0.35)", fontSize: 12, color: "rgba(148, 163, 184, 0.85)", background: "rgba(12, 14, 22, 0.85)" },
@@ -62,6 +66,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
   const [contextStats, setContextStats] = useState(() => ({ ...defaultContextStats }));
   const [pendingFollowUp, setPendingFollowUp] = useState(null);
   const [continuing, setContinuing] = useState(false);
+  const [expandedSources, setExpandedSources] = useState({});
   const warmupAttemptRef = useRef(false);
   const messagesBodyRef = useRef(null);
   const navigate = useNavigate();
@@ -103,6 +108,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
     setContextStats({ ...defaultContextStats });
     setPendingFollowUp(null);
     setContinuing(false);
+    setExpandedSources({});
   };
 
   const handleAsk = async () => {
@@ -193,6 +199,25 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
     setPendingFollowUp(null);
   };
 
+  const toggleSourcePreview = (messageId, sourceKey) => {
+    if (!messageId || !sourceKey) return;
+    setExpandedSources((prev) => {
+      const current = new Set(prev[messageId] || []);
+      if (current.has(sourceKey)) {
+        current.delete(sourceKey);
+      } else {
+        current.add(sourceKey);
+      }
+      const next = { ...prev };
+      if (current.size === 0) {
+        delete next[messageId];
+      } else {
+        next[messageId] = Array.from(current);
+      }
+      return next;
+    });
+  };
+
   return (
     <div style={styles.page}>
       <section style={styles.chatCard}>
@@ -218,8 +243,10 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
             <div style={styles.muted}>{warmedUp ? "✅ Ready! Ask a question to get started." : "Ask a question to get started."}</div>
           ) : (
             <div style={styles.messageList}>
-              {messages.map((m, i) => (
-                <div key={m.id || `${m.role}-${i}-${Math.abs(m.content?.length || 0)}`} style={m.error ? styles.errorBubble : m.role === "user" ? styles.userBubble : styles.assistantBubble}>
+              {messages.map((m, i) => {
+                const expandedForMessage = expandedSources[m.id] || [];
+                return (
+                  <div key={m.id || `${m.role}-${i}-${Math.abs(m.content?.length || 0)}`} style={m.error ? styles.errorBubble : m.role === "user" ? styles.userBubble : styles.assistantBubble}>
                   <div style={styles.messageRole}>{m.role === "user" ? "You" : "Assistant"}</div>
                   <div>{m.content}</div>
                   {m.role === "assistant" && m.pendingFollowUp && !m.error && (
@@ -234,33 +261,45 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
                     <div style={styles.sourcesBlock}>
                       <div style={{ fontWeight: 600, marginBottom: 4 }}>Sources</div>
                       <ol style={{ margin: 0, paddingLeft: 18 }}>
-                        {m.sources.map((s, idx) => (
-                          <li key={`${s.chunk_id || s.doc_hash || idx}-${idx}`} style={{ marginBottom: 6 }}>
-                            <div>
-                              <strong style={{ color: "rgba(226, 232, 240, 0.95)" }}>{s.document_name || "unknown"}</strong>
-                              {s.total_chunks > 0 && (
-                                <span style={{ marginLeft: 8, fontSize: 12 }}>
-                                  chunk {s.order_index + 1}/{s.total_chunks}
-                                </span>
-                              )}
-                              {typeof s.score === "number" && (
-                                <span style={{ marginLeft: 8, fontSize: 12, color: "rgba(148, 163, 184, 0.7)" }}>
-                                  similarity: {(s.score * 100).toFixed(1)}%
-                                </span>
-                              )}
-                            </div>
-                            {s.chunk_text_preview && (
-                              <div style={{ fontSize: 11, color: "rgba(148, 163, 184, 0.6)", fontStyle: "italic", marginTop: 2 }}>
-                                "{s.chunk_text_preview}..."
+                        {m.sources.map((s, idx) => {
+                          const sourceKey = `${s.chunk_id || s.doc_hash || idx}-${idx}`;
+                          const isExpanded = expandedForMessage.includes(sourceKey);
+                          return (
+                            <li key={sourceKey} style={styles.sourceItem}>
+                              <div style={styles.sourceHeader}>
+                                <div>
+                                  <strong style={{ color: "rgba(226, 232, 240, 0.95)" }}>{s.document_name || "unknown"}</strong>
+                                  {s.total_chunks > 0 && (
+                                    <span style={{ marginLeft: 8, fontSize: 12 }}>
+                                      chunk {s.order_index + 1}/{s.total_chunks}
+                                    </span>
+                                  )}
+                                  {typeof s.score === "number" && (
+                                    <span style={{ marginLeft: 8, fontSize: 12, color: "rgba(148, 163, 184, 0.7)" }}>
+                                      similarity: {(s.score * 100).toFixed(1)}%
+                                    </span>
+                                  )}
+                                </div>
+                                {s.chunk_text_preview && (
+                                  <button type="button" onClick={() => toggleSourcePreview(m.id, sourceKey)} style={{ ...styles.sourceToggle, opacity: isExpanded ? 0.85 : 1 }}>
+                                    {isExpanded ? "Hide chunk" : "Show chunk"}
+                                  </button>
+                                )}
                               </div>
-                            )}
-                          </li>
-                        ))}
+                              {isExpanded && s.chunk_text_preview && (
+                                <div style={styles.sourcePreview}>
+                                  "{s.chunk_text_preview}..."
+                                </div>
+                              )}
+                            </li>
+                          );
+                        })}
                       </ol>
                     </div>
                   )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
