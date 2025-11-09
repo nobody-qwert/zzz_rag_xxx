@@ -50,3 +50,5 @@ models/*
 .python-version
 .ruff_cache/
 .cache/
+
+app_data/

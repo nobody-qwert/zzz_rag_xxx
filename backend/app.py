@@ -267,24 +267,17 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
         pymupdf_time = time.perf_counter() - start_pymupdf
         await document_store.upsert_extraction(doc_hash, "pymupdf", text=py_out["text"], meta_json=json.dumps({"pages": py_out.get("pages", 0)}))
 
-        # Decide whether to run the OCR module based on PARSER_MODE
-        use_ocr = True
         pymupdf_text = py_out.get("text", "") or ""
-        pages = int(py_out.get("pages", 0) or 0)
-        if PARSER_MODE == "pymupdf":
-            use_ocr = False
-        elif PARSER_MODE == "auto":
-            # If PyMuPDF extracted sufficient text per page, skip OCR-rich path
-            cpp = (len(pymupdf_text) / max(1, pages)) if pages else len(pymupdf_text)
-            use_ocr = cpp < float(MIN_PYMUPDF_CHARS_PER_PAGE)
-        elif PARSER_MODE != "ocr":
-            use_ocr = False
+        chosen_text = pymupdf_text
+        chosen_meta: Dict[str, Any] = {"parser_used": "pymupdf", "reason": "default"}
 
-        # Only run OCR for actual PDFs; skip for images and other types
-        if use_ocr and not _is_pdf_file(doc_path):
-            use_ocr = False
+        run_ocr = PARSER_MODE != "pymupdf"
+        ocr_allowed = _is_pdf_file(doc_path)
+        if run_ocr and not ocr_allowed:
+            run_ocr = False
+            logger.debug("Skipping OCR for non-PDF file %s", doc_path)
 
-        if use_ocr:
+        if run_ocr:
             # 2) OCR module rich extraction (GPU when available)
             start_mineru = time.perf_counter()
             try:
@@ -295,23 +288,43 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
                 await document_store.upsert_extraction(
                     doc_hash,
                     OCR_PARSER_KEY,
-                    text=ocr_text,
-                    meta_json=json.dumps(ocr_meta),
+                    text=ocr_text or pymupdf_text,
+                    meta_json=json.dumps({**ocr_meta, "source": "ocr", "fallback_used": not bool(ocr_text)}),
                 )
-                chosen_text = ocr_text
-                chosen_meta = {"parser_used": OCR_PARSER_KEY}
+                if ocr_text:
+                    chosen_text = ocr_text
+                    chosen_meta = {"parser_used": OCR_PARSER_KEY}
+                else:
+                    chosen_meta = {
+                        "parser_used": "pymupdf",
+                        "reason": "ocr_empty_text",
+                    }
             except Exception as exc:
                 # Graceful fallback: keep pipeline alive using PyMuPDF-only text
                 mineru_time = None
                 logger.warning("OCR module failed for %s: %s — falling back to PyMuPDF text", doc_path, exc)
+                fallback_meta = {
+                    "parser_used": "pymupdf",
+                    "reason": f"ocr_module_failed: {exc}",
+                }
                 chosen_text = pymupdf_text
-                chosen_meta = {"parser_used": "pymupdf", "reason": f"ocr_module_failed: {exc}"}
-                await document_store.upsert_extraction(doc_hash, OCR_PARSER_KEY, text=chosen_text, meta_json=json.dumps(chosen_meta))
+                chosen_meta = fallback_meta
+                await document_store.upsert_extraction(
+                    doc_hash,
+                    OCR_PARSER_KEY,
+                    text=pymupdf_text,
+                    meta_json=json.dumps({**fallback_meta, "source": "pymupdf"}),
+                )
         else:
             # Skip OCR module; use PyMuPDF-only text for downstream steps but store under OCR parser key for compatibility
-            chosen_text = pymupdf_text
-            chosen_meta = {"parser_used": "pymupdf", "reason": "auto-skip or configured"}
-            await document_store.upsert_extraction(doc_hash, OCR_PARSER_KEY, text=chosen_text, meta_json=json.dumps(chosen_meta))
+            skip_reason = "non_pdf" if not ocr_allowed else "pymupdf_only"
+            chosen_meta = {"parser_used": "pymupdf", "reason": skip_reason}
+            await document_store.upsert_extraction(
+                doc_hash,
+                OCR_PARSER_KEY,
+                text=pymupdf_text,
+                meta_json=json.dumps({"parser_used": "pymupdf", "reason": skip_reason, "source": "pymupdf"}),
+            )
 
         # 3) Chunk from OCR text
         start_chunking = time.perf_counter()

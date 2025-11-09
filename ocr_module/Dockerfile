@@ -19,6 +19,7 @@ RUN uv pip install --system \
     uvicorn[standard]\>=0.29 \
     PyMuPDF\>=1.24.0 \
     mineru\>=2.5.4 \
+    python-multipart\>=0.0.9 \
     doclayout-yolo\>=0.0.4 \
     ultralytics\>=8.0.0 \
     transformers\>=4.38.0 \
