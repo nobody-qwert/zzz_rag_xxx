@@ -57,6 +57,8 @@ CONTINUE_PROMPT = (
     "Resume exactly where it stopped without repeating earlier content."
 )
 
+COMPLETED_DOC_STATUSES = {"processed", "done", "completed", "ready"}
+
 
 class AskRequest(BaseModel):
     query: Optional[str] = Field(default=None)
@@ -464,8 +466,9 @@ async def list_docs() -> List[Dict[str, Any]]:
     result = []
     for d in docs:
         doc_data = _format_document_row(d)
-        # Add performance metrics if available
-        if d.get("doc_hash"):
+        status = str(doc_data.get("status") or "").strip().lower()
+        # Add performance metrics only for completed documents
+        if d.get("doc_hash") and status in COMPLETED_DOC_STATUSES:
             metrics = await document_store.get_performance_metrics(d["doc_hash"])
             doc_data["performance"] = metrics
         result.append(doc_data)

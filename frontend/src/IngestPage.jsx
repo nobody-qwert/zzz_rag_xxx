@@ -50,6 +50,7 @@ const styles = {
 const FALLBACK_PARSER = "mineru";
 const FALLBACK_PARSER_OPTIONS = [FALLBACK_PARSER, "pymupdf"];
 const IN_PROGRESS_STATUSES = new Set(["processing", "ingesting", "queued", "pending", "running", "parsing", "uploading"]);
+const COMPLETED_STATUSES = new Set(["processed", "done", "completed", "ready"]);
 
 export default function IngestPage({ systemStatus = {} }) {
   const api = useMemo(() => ({
@@ -458,9 +459,11 @@ export default function IngestPage({ systemStatus = {} }) {
                 const statusLabel = String(d.status || "pending").trim().toLowerCase();
                 const isErrored = statusLabel === "error";
                 const isInProgress = IN_PROGRESS_STATUSES.has(statusLabel);
+                const isCompleted = COMPLETED_STATUSES.has(statusLabel);
                 const canPreviewInHeader = Boolean(d.hash && !isErrored && !isInProgress);
                 const showStatusPill = !canPreviewInHeader;
                 const showRetry = isErrored && Boolean(d.hash);
+                const showPerf = hasPerf && isCompleted;
                 const isDeleting = deletingHash === d.hash;
                 
                 return (
@@ -510,7 +513,7 @@ export default function IngestPage({ systemStatus = {} }) {
                     {d.error && (<div style={styles.error}>Error: {d.error}</div>)}
                     
                     {/* Performance Metrics */}
-                    {hasPerf && (
+                    {showPerf && (
                       <div style={{ marginTop: 8 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                           <span style={{ fontSize: 11, color: "rgba(148, 163, 184, 0.7)" }}>⚡</span>

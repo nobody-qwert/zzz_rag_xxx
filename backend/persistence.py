@@ -171,6 +171,7 @@ class DocumentStore:
     async def _conn(self) -> aiosqlite.Connection:
         await self.init()
         conn = await aiosqlite.connect(self.db_path)
+        await conn.execute("PRAGMA foreign_keys=ON;")
         conn.row_factory = aiosqlite.Row
         return conn
 
@@ -256,6 +257,9 @@ class DocumentStore:
     async def delete_document(self, doc_hash: str) -> bool:
         conn = await self._conn()
         try:
+            await conn.execute("BEGIN")
+            for table in ("performance_metrics", "embeddings", "chunks", "extractions", "jobs"):
+                await conn.execute(f"DELETE FROM {table} WHERE doc_hash=?", (doc_hash,))
             cur = await conn.execute("DELETE FROM documents WHERE doc_hash=?", (doc_hash,))
             await conn.commit()
             return cur.rowcount > 0
