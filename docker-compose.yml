@@ -3,35 +3,55 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-      args:
-        PREFETCH_MODELS: ${PREFETCH_MODELS:-0}
     env_file: .env
     depends_on:
       - llm
       - embed
+      - ocr-module
     environment:
+      APP_DATA_ROOT: ${APP_DATA_ROOT:-/app_data}
       LLM_BASE_URL: ${LLM_BASE_URL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
       EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
       EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL}
-      DATA_DIR: ${DATA_DIR:-/data}
-      INDEX_DIR: ${INDEX_DIR:-/indices}
-      MINERU_DEVICE_MODE: ${MINERU_DEVICE_MODE:-auto}
-      # Cache locations (persisted via indices volume)
-      HF_HOME: /indices/hf_cache
-      TRANSFORMERS_CACHE: /indices/hf_cache
-      ULTRALYTICS_HOME: /indices/ultralytics
-      # Parser controls
-      PARSER_MODE: ${PARSER_MODE:-mineru}
+      DATA_DIR: ${DATA_DIR:-/app_data/docs}
+      INDEX_DIR: ${INDEX_DIR:-/app_data/runtime}
+      DOC_STORE_PATH: ${DOC_STORE_PATH:-/app_data/rag_meta.db}
+      PARSER_MODE: ${PARSER_MODE:-ocr}
       MIN_PYMUPDF_CHARS_PER_PAGE: ${MIN_PYMUPDF_CHARS_PER_PAGE:-300}
+      OCR_MODULE_URL: ${OCR_MODULE_URL:-http://ocr-module:8000}
+      OCR_MODULE_TIMEOUT: ${OCR_MODULE_TIMEOUT:-180}
+      OCR_PARSER_KEY: ${OCR_PARSER_KEY:-mineru}
+    volumes:
+      - ${HOST_APP_DATA:-./app_data}:${APP_DATA_ROOT:-/app_data}
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+
+  ocr-module:
+    build:
+      context: ./ocr_module
+      dockerfile: Dockerfile
+      args:
+        PREFETCH_MODELS: ${PREFETCH_MODELS:-0}
+    env_file: .env
+    environment:
+      APP_DATA_ROOT: ${APP_DATA_ROOT:-/app_data}
+      DATA_DIR: ${DATA_DIR:-/app_data/docs}
+      INDEX_DIR: ${INDEX_DIR:-/app_data/runtime}
+      OCR_OUTPUT_DIR: ${OCR_OUTPUT_DIR:-/app_data/runtime/ocr_outputs}
+      OCR_INCOMING_DIR: ${OCR_INCOMING_DIR:-/app_data/runtime/incoming}
+      OCR_WARMUP_DIR: ${OCR_WARMUP_DIR:-/app_data/runtime/warmup}
+      MINERU_DEVICE_MODE: ${MINERU_DEVICE_MODE:-auto}
       MINERU_PARSE_METHOD: ${MINERU_PARSE_METHOD:-auto}
       MINERU_LANG: ${MINERU_LANG:-en}
       MINERU_TABLE_ENABLE: ${MINERU_TABLE_ENABLE:-true}
       MINERU_FORMULA_ENABLE: ${MINERU_FORMULA_ENABLE:-true}
       MINERU_WARMUP_ON_STARTUP: ${MINERU_WARMUP_ON_STARTUP:-false}
-    # Requires NVIDIA Container Toolkit installed on host
+      HF_HOME: ${HF_HOME:-/app_data/runtime/caches/hf}
+      TRANSFORMERS_CACHE: ${TRANSFORMERS_CACHE:-/app_data/runtime/caches/hf}
+      ULTRALYTICS_HOME: ${ULTRALYTICS_HOME:-/app_data/runtime/caches/ultralytics}
     deploy:
       resources:
         reservations:
@@ -40,10 +60,7 @@ services:
               count: all
               capabilities: [gpu]
     volumes:
-      - ./data:${DATA_DIR:-/data}
-      - ./indices:${INDEX_DIR:-/indices}
-    ports:
-      - "${BACKEND_PORT:-8000}:8000"
+      - ${HOST_APP_DATA:-./app_data}:${APP_DATA_ROOT:-/app_data}
 
   llm:
     build:

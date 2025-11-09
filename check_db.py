@@ -2,7 +2,7 @@
 import sqlite3
 import json
 
-db_path = "rag_mineru/data/rag_meta.db"
+db_path = "app_data/rag_meta.db"
 conn = sqlite3.connect(db_path)
 conn.row_factory = sqlite3.Row
 cursor = conn.cursor()

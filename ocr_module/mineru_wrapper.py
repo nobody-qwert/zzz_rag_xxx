@@ -174,7 +174,8 @@ def warmup_mineru(*,
     pdf_bytes = doc.tobytes()
     doc.close()
 
-    out_base = Path(tmp_dir or os.environ.get("INDEX_DIR", "/indices")) / "_warmup"
+    default_base = Path(os.environ.get("INDEX_DIR", "/app_data/runtime")) / "_warmup"
+    out_base = Path(tmp_dir) if tmp_dir is not None else default_base
     out_base.mkdir(parents=True, exist_ok=True)
 
     # Effective config

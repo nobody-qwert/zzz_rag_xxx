@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import os
+import httpx
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
@@ -14,7 +15,6 @@ from pydantic import BaseModel, Field
 from uuid import uuid4
 
 from persistence import DocumentStore, EmbeddingRow
-from mineru_wrapper import run_mineru, warmup_mineru
 from chunking import sliding_token_chunks
 from embeddings import EmbeddingClient
 from token_utils import estimate_messages_tokens, estimate_tokens, truncate_text_to_tokens
@@ -23,8 +23,8 @@ from token_utils import estimate_messages_tokens, estimate_tokens, truncate_text
 logger = logging.getLogger(__name__)
 
 
-DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
-INDEX_DIR = Path(os.environ.get("INDEX_DIR", "/indices"))
+DATA_DIR = Path(os.environ.get("DATA_DIR", "/app_data/docs"))
+INDEX_DIR = Path(os.environ.get("INDEX_DIR", "/app_data/runtime"))
 DOC_STORE_PATH = Path(os.environ.get("DOC_STORE_PATH") or (DATA_DIR / "rag_meta.db"))
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -32,14 +32,15 @@ INDEX_DIR.mkdir(parents=True, exist_ok=True)
 
 document_store = DocumentStore(DOC_STORE_PATH)
 
-# Parser strategy: 'mineru' | 'pymupdf' | 'auto'
-PARSER_MODE = (os.environ.get("PARSER_MODE") or "mineru").strip().lower()
+# Parser strategy: 'ocr' | 'pymupdf' | 'auto'
+PARSER_MODE = (os.environ.get("PARSER_MODE") or "ocr").strip().lower()
 MIN_PYMUPDF_CHARS_PER_PAGE = int(os.environ.get("MIN_PYMUPDF_CHARS_PER_PAGE", "300") or 300)
-MINERU_LANG = (os.environ.get("MINERU_LANG") or "en").strip()
-MINERU_PARSE_METHOD = (os.environ.get("MINERU_PARSE_METHOD") or "auto").strip().lower()
-MINERU_TABLE_ENABLE = (os.environ.get("MINERU_TABLE_ENABLE") or "true").strip().lower()
-MINERU_FORMULA_ENABLE = (os.environ.get("MINERU_FORMULA_ENABLE") or "true").strip().lower()
-MINERU_WARMUP_ON_STARTUP = (os.environ.get("MINERU_WARMUP_ON_STARTUP") or "false").strip().lower()
+OCR_PARSER_KEY = (os.environ.get("OCR_PARSER_KEY") or "mineru").strip().lower()
+OCR_MODULE_URL = (os.environ.get("OCR_MODULE_URL") or "http://ocr-module:8000").rstrip("/")
+try:
+    OCR_MODULE_TIMEOUT = float(os.environ.get("OCR_MODULE_TIMEOUT", "120") or 120)
+except ValueError:
+    OCR_MODULE_TIMEOUT = 120.0
 
 CHAT_CONTEXT_WINDOW = int(os.environ.get("CHAT_CONTEXT_WINDOW", "10000") or 10000)
 CHAT_COMPLETION_MAX_TOKENS = int(os.environ.get("CHAT_COMPLETION_MAX_TOKENS", "2048") or 2048)
@@ -81,6 +82,18 @@ jobs: Dict[str, Dict[str, Any]] = {}
 
 def _safe_filename(name: str) -> str:
     return "".join(c for c in name if c.isalnum() or c in (".", "_", "-", " ")).strip()[:255] or "upload.bin"
+
+
+def _unique_ordered(values: List[str]) -> List[str]:
+    seen = set()
+    ordered: List[str] = []
+    for value in values:
+        key = (value or "").strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        ordered.append(key)
+    return ordered
 
 
 def _summarize_history(messages: List[Dict[str, str]], *, max_entries: int = 6, max_chars: int = 800) -> str:
@@ -205,6 +218,31 @@ async def _compute_embeddings_for_chunks(chunks: List[Dict[str, Any]], client: E
     return rows
 
 
+async def _call_ocr_module(doc_hash: str, doc_path: Path) -> Dict[str, Any]:
+    if not doc_path.exists():
+        raise RuntimeError(f"OCR source file missing: {doc_path}")
+
+    form_data = {"doc_hash": doc_hash}
+    filename = doc_path.name or f"{doc_hash}.bin"
+    content_type = "application/pdf" if doc_path.suffix.lower() == ".pdf" else "application/octet-stream"
+
+    timeout = httpx.Timeout(OCR_MODULE_TIMEOUT, connect=10.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        try:
+            with doc_path.open("rb") as file_obj:
+                files = {"file": (filename, file_obj, content_type)}
+                response = await client.post(f"{OCR_MODULE_URL}/parse", data=form_data, files=files)
+            response.raise_for_status()
+            data = response.json()
+        except httpx.HTTPStatusError as exc:
+            detail = exc.response.text if exc.response is not None else str(exc)
+            raise RuntimeError(f"OCR module returned {exc.response.status_code}: {detail}") from exc
+        except httpx.RequestError as exc:
+            raise RuntimeError(f"OCR module request failed: {exc}") from exc
+
+    return data
+
+
 async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name: str) -> None:
     import time
     
@@ -229,69 +267,59 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
         pymupdf_time = time.perf_counter() - start_pymupdf
         await document_store.upsert_extraction(doc_hash, "pymupdf", text=py_out["text"], meta_json=json.dumps({"pages": py_out.get("pages", 0)}))
 
-        # Decide whether to run MinerU based on PARSER_MODE
-        use_mineru = True
+        # Decide whether to run the OCR module based on PARSER_MODE
+        use_ocr = True
         pymupdf_text = py_out.get("text", "") or ""
         pages = int(py_out.get("pages", 0) or 0)
         if PARSER_MODE == "pymupdf":
-            use_mineru = False
+            use_ocr = False
         elif PARSER_MODE == "auto":
             # If PyMuPDF extracted sufficient text per page, skip OCR-rich path
             cpp = (len(pymupdf_text) / max(1, pages)) if pages else len(pymupdf_text)
-            use_mineru = cpp < float(MIN_PYMUPDF_CHARS_PER_PAGE)
+            use_ocr = cpp < float(MIN_PYMUPDF_CHARS_PER_PAGE)
+        elif PARSER_MODE != "ocr":
+            use_ocr = False
 
-        # Only run MinerU for actual PDFs; skip for images and other types
-        if use_mineru and not _is_pdf_file(doc_path):
-            use_mineru = False
+        # Only run OCR for actual PDFs; skip for images and other types
+        if use_ocr and not _is_pdf_file(doc_path):
+            use_ocr = False
 
-        if use_mineru:
-            # 2) MinerU rich extraction (GPU when available)
+        if use_ocr:
+            # 2) OCR module rich extraction (GPU when available)
             start_mineru = time.perf_counter()
-            mineru_dir = INDEX_DIR / f"mineru/{doc_hash}"
             try:
-                mineru_res = await asyncio.to_thread(
-                    run_mineru,
-                    doc_path,
-                    mineru_dir,
-                    parse_method=MINERU_PARSE_METHOD,
-                    lang=MINERU_LANG,
-                    table_enable=(MINERU_TABLE_ENABLE in {"1", "true", "yes", "on"}),
-                    formula_enable=(MINERU_FORMULA_ENABLE in {"1", "true", "yes", "on"}),
-                )
+                ocr_result = await _call_ocr_module(doc_hash, doc_path)
                 mineru_time = time.perf_counter() - start_mineru
+                ocr_text = ocr_result.get("text") or ""
+                ocr_meta = ocr_result.get("metadata") or {}
                 await document_store.upsert_extraction(
                     doc_hash,
-                    "mineru",
-                    text=mineru_res.text,
-                    meta_json=json.dumps(mineru_res.metadata),
+                    OCR_PARSER_KEY,
+                    text=ocr_text,
+                    meta_json=json.dumps(ocr_meta),
                 )
-                chosen_text = mineru_res.text
-                chosen_meta = {"parser_used": "mineru"}
+                chosen_text = ocr_text
+                chosen_meta = {"parser_used": OCR_PARSER_KEY}
             except Exception as exc:
                 # Graceful fallback: keep pipeline alive using PyMuPDF-only text
                 mineru_time = None
-                logger.warning("MinerU failed for %s: %s — falling back to PyMuPDF text", doc_path, exc)
+                logger.warning("OCR module failed for %s: %s — falling back to PyMuPDF text", doc_path, exc)
                 chosen_text = pymupdf_text
-                chosen_meta = {"parser_used": "pymupdf", "reason": f"mineru_failed: {exc}"}
-                await document_store.upsert_extraction(
-                    doc_hash,
-                    "mineru",
-                    text=chosen_text,
-                    meta_json=json.dumps(chosen_meta),
-                )
+                chosen_meta = {"parser_used": "pymupdf", "reason": f"ocr_module_failed: {exc}"}
+                await document_store.upsert_extraction(doc_hash, OCR_PARSER_KEY, text=chosen_text, meta_json=json.dumps(chosen_meta))
         else:
-            # Skip MinerU; use PyMuPDF-only text for downstream steps but store under 'mineru' chunks for compatibility
+            # Skip OCR module; use PyMuPDF-only text for downstream steps but store under OCR parser key for compatibility
             chosen_text = pymupdf_text
             chosen_meta = {"parser_used": "pymupdf", "reason": "auto-skip or configured"}
-            await document_store.upsert_extraction(doc_hash, "mineru", text=chosen_text, meta_json=json.dumps(chosen_meta))
+            await document_store.upsert_extraction(doc_hash, OCR_PARSER_KEY, text=chosen_text, meta_json=json.dumps(chosen_meta))
 
-        # 3) Chunk from MinerU text
+        # 3) Chunk from OCR text
         start_chunking = time.perf_counter()
         size = int(os.environ.get("CHUNK_SIZE", "500") or 500)
         overlap = int(os.environ.get("CHUNK_OVERLAP", "100") or 100)
         chunks = sliding_token_chunks(chosen_text, size=size, overlap=overlap)
         chunk_rows = [(c.chunk_id, c.order_index, c.text, c.token_count) for c in chunks]
-        await document_store.replace_chunks(doc_hash, "mineru", chunk_rows)
+        await document_store.replace_chunks(doc_hash, OCR_PARSER_KEY, chunk_rows)
         chunking_time = time.perf_counter() - start_chunking
 
         # 4) Embeddings (local service)
@@ -339,26 +367,10 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await document_store.init()
-    # Optional MinerU warmup to eliminate first-ingest model init latency
-    if MINERU_WARMUP_ON_STARTUP in {"1", "true", "yes", "on"}:
-        async def _do_warmup() -> None:
-            try:
-                await asyncio.to_thread(
-                    warmup_mineru,
-                    parse_method=MINERU_PARSE_METHOD,
-                    lang=MINERU_LANG,
-                    table_enable=(MINERU_TABLE_ENABLE in {"1", "true", "yes", "on"}),
-                    formula_enable=(MINERU_FORMULA_ENABLE in {"1", "true", "yes", "on"}),
-                )
-                logger.info("MinerU warmup completed")
-            except Exception as exc:
-                logger.warning("MinerU warmup failed: %s", exc)
-
-        asyncio.create_task(_do_warmup())
     yield
 
 
-app = FastAPI(title="RAG MinerU Backend", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="RAG Backend", version="0.1.0", lifespan=lifespan)
 
 frontend_origin = f"http://localhost:{os.environ.get('FRONTEND_PORT', '5173')}"
 app.add_middleware(
@@ -385,7 +397,7 @@ def _format_document_row(doc: Dict[str, Any]) -> Dict[str, Any]:
         "status": doc.get("status") or "unknown",
         "hash": doc.get("doc_hash"),
         "stored_name": stored_name,
-        "path": f"/data/{stored_name}",
+        "path": str(DATA_DIR / stored_name),
         "last_ingested_at": doc.get("last_ingested_at"),
         "error": doc.get("error"),
         "updated_at": doc.get("updated_at"),
@@ -445,6 +457,12 @@ async def list_docs() -> List[Dict[str, Any]]:
             doc_data["performance"] = metrics
         result.append(doc_data)
     return result
+
+
+@app.get("/parsers")
+async def list_parsers() -> Dict[str, Any]:
+    options = _unique_ordered([OCR_PARSER_KEY, "pymupdf"])
+    return {"default": OCR_PARSER_KEY, "options": options}
 
 
 @app.post("/ingest")
@@ -515,13 +533,14 @@ async def retry_ingest(doc_hash: str) -> Dict[str, Any]:
 
 
 @app.get("/debug/parsed_text/{doc_hash}")
-async def debug_parsed_text(doc_hash: str, parser: str = "mineru", max_chars: int = 2000) -> Dict[str, Any]:
+async def debug_parsed_text(doc_hash: str, parser: Optional[str] = None, max_chars: int = 2000) -> Dict[str, Any]:
+    parser_key = (parser or OCR_PARSER_KEY)
     doc = await document_store.get_document(doc_hash)
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
-    row = await document_store.get_extraction(doc_hash, parser)
+    row = await document_store.get_extraction(doc_hash, parser_key)
     if not row:
-        raise HTTPException(status_code=404, detail=f"No extraction found for parser '{parser}'")
+        raise HTTPException(status_code=404, detail=f"No extraction found for parser '{parser_key}'")
     text = row["text"] or ""
     
     # Get chunk statistics for this document
@@ -601,7 +620,7 @@ async def ask(req: AskRequest) -> AskResponse:
     if distilled_vec is None:
         raise HTTPException(status_code=500, detail="Failed to embed query")
 
-    chunks = await document_store.fetch_chunks(parser="mineru")
+    chunks = await document_store.fetch_chunks(parser=OCR_PARSER_KEY)
     chunk_ids = [c["chunk_id"] for c in chunks]
     emb_rows = await document_store.fetch_embeddings_for_chunks(chunk_ids)
     emb_by_id = {r.chunk_id: r for r in emb_rows}
@@ -813,17 +832,19 @@ async def warmup() -> Dict[str, Any]:
 
 @app.post("/warmup/mineru")
 async def warmup_mineru_route() -> Dict[str, Any]:
-    try:
-        info = await asyncio.to_thread(
-            warmup_mineru,
-            parse_method=MINERU_PARSE_METHOD,
-            lang=MINERU_LANG,
-            table_enable=(MINERU_TABLE_ENABLE in {"1", "true", "yes", "on"}),
-            formula_enable=(MINERU_FORMULA_ENABLE in {"1", "true", "yes", "on"}),
-        )
-        return {"warmup_complete": True, **info}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"MinerU warmup failed: {exc}")
+    timeout = httpx.Timeout(OCR_MODULE_TIMEOUT, connect=10.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        try:
+            resp = await client.post(f"{OCR_MODULE_URL}/warmup")
+            resp.raise_for_status()
+            return resp.json()
+        except httpx.HTTPStatusError as exc:
+            detail = exc.response.text if exc.response is not None else str(exc)
+            logger.exception("OCR module warmup failed with HTTP %s", exc.response.status_code if exc.response is not None else "unknown")
+            raise HTTPException(status_code=500, detail=f"OCR module warmup failed: {detail}") from exc
+        except httpx.RequestError as exc:
+            logger.exception("OCR module warmup request error")
+            raise HTTPException(status_code=500, detail=f"OCR module warmup request failed: {exc}") from exc
 
 
 if __name__ == "__main__":

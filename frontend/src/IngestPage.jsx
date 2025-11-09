@@ -39,13 +39,16 @@ const styles = {
   error: { fontSize: 13, color: "#ff8f8f", marginTop: 6 },
 };
 
+const FALLBACK_PARSER = "mineru";
+const FALLBACK_PARSER_OPTIONS = [FALLBACK_PARSER, "pymupdf"];
+
 export default function IngestPage({ systemStatus = {} }) {
   const api = useMemo(() => ({
     ingest: "/api/ingest",
     docs: "/api/documents",
     status: (jobId) => `/api/status/${jobId}`,
     retry: (hash) => `/api/ingest/${hash}/retry`,
-    previewText: (hash, maxChars = 2000, parser = "mineru") => `/api/debug/parsed_text/${hash}?parser=${parser}&max_chars=${maxChars}`,
+    previewText: (hash, maxChars = 2000, parser = FALLBACK_PARSER) => `/api/debug/parsed_text/${hash}?parser=${parser}&max_chars=${maxChars}`,
   }), []);
 
   const [docs, setDocs] = useState([]);
@@ -62,7 +65,8 @@ export default function IngestPage({ systemStatus = {} }) {
   const [previewError, setPreviewError] = useState("");
   const [previewInfo, setPreviewInfo] = useState(null);
   const [previewMaxChars, setPreviewMaxChars] = useState(2000);
-  const [parser, setParser] = useState("mineru");
+  const [parser, setParser] = useState(FALLBACK_PARSER);
+  const [parserOptions, setParserOptions] = useState(FALLBACK_PARSER_OPTIONS);
   const [expandedPerf, setExpandedPerf] = useState(new Set());
 
   const refreshDocs = useCallback(async () => {
@@ -73,6 +77,46 @@ export default function IngestPage({ systemStatus = {} }) {
   }, [api.docs]);
 
   useEffect(() => { void refreshDocs(); }, [refreshDocs]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const fetchParsers = async () => {
+      try {
+        const res = await fetch("/api/parsers");
+        const data = await readJsonSafe(res);
+        if (!res.ok || cancelled) return;
+        const available = Array.isArray(data?.options)
+          ? data.options
+          : Array.isArray(data?.available)
+            ? data.available
+            : [];
+        const cleaned = Array.from(
+          new Set(
+            available
+              .map((v) => (typeof v === "string" ? v.trim() : ""))
+              .filter(Boolean)
+          )
+        );
+        if (!cancelled && cleaned.length > 0) {
+          setParserOptions(cleaned);
+        }
+        const nextDefault = typeof data?.default === "string"
+          ? data.default.trim()
+          : typeof data?.default_parser === "string"
+            ? data.default_parser.trim()
+            : typeof data?.ocr_parser === "string"
+              ? data.ocr_parser.trim()
+              : "";
+        if (!cancelled && nextDefault) {
+          setParser(prev => (prev === nextDefault ? prev : nextDefault));
+        }
+      } catch (err) {
+        console.warn("Failed to load parser metadata", err);
+      }
+    };
+    void fetchParsers();
+    return () => { cancelled = true; };
+  }, []);
 
   const systemDocs = useMemo(() => (Array.isArray(systemStatus.documents) ? systemStatus.documents : []), [systemStatus.documents]);
   const displayDocs = docs.length ? docs : systemDocs;
@@ -311,8 +355,11 @@ export default function IngestPage({ systemStatus = {} }) {
                 <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                   <label style={{ ...styles.muted, fontSize: 12 }}>Parser</label>
                   <select value={parser} onChange={(e) => setParser(e.target.value)} style={{ ...styles.input, padding: "6px 10px", fontSize: 13 }}>
-                    <option value="mineru">mineru</option>
-                    <option value="pymupdf">pymupdf</option>
+                    {parserOptions.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
                   </select>
                   <label style={{ ...styles.muted, fontSize: 12, marginLeft: 8 }}>Max chars</label>
                   <input type="number" min={200} max={20000} step={100} value={previewMaxChars} onChange={(e) => setPreviewMaxChars(Number(e.target.value) || 2000)} style={{ ...styles.input, width: 100, padding: "6px 10px", fontSize: 13 }} />
