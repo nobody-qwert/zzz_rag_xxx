@@ -43,7 +43,12 @@ const styles = {
   docMetaItem: { whiteSpace: "nowrap" },
   docActions: { display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 },
   docPreviewButton: { font: "inherit", fontSize: 13, padding: "4px 12px", borderRadius: 999, border: "1px solid rgba(148, 163, 184, 0.35)", background: "rgba(84, 105, 255, 0.15)", color: "rgba(226, 232, 240, 0.98)", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" },
-  dangerIconButton: { font: "inherit", fontSize: 16, lineHeight: 1, width: 16, height: 16, borderRadius: 0, border: "1px solid rgba(239, 68, 68, 0.7)", background: "rgba(69, 10, 10, 0.65)", color: "rgba(248, 250, 252, 0.9)", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0 },
+  dangerIconButton: { font: "inherit", fontSize: 16, lineHeight: 1, width: 24, height: 24, borderRadius: 0, border: "1px solid rgba(239, 68, 68, 0.7)", background: "rgba(69, 10, 10, 0.65)", color: "rgba(248, 250, 252, 0.9)", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0 },
+  docIngestRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 6, fontSize: 12, color: "rgba(148, 163, 184, 0.85)" },
+  docIngestInfo: { flex: 1, lineHeight: 1.4 },
+  docPerfToggle: { font: "inherit", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 4, padding: 0, border: "none", background: "transparent", color: "rgba(148, 163, 184, 0.75)", cursor: "pointer" },
+  docPerfToggleActive: { color: "rgba(226, 232, 240, 0.95)" },
+  docPerfDetails: { marginTop: 4, marginLeft: 12, fontSize: 11, color: "rgba(148, 163, 184, 0.85)", lineHeight: 1.6 },
   muted: { opacity: 0.75, fontSize: 13, color: "rgba(148, 163, 184, 0.8)" },
   error: { fontSize: 13, color: "#ff8f8f", marginTop: 6 },
 };
@@ -510,41 +515,42 @@ export default function IngestPage({ systemStatus = {} }) {
                       )}
                     </div>
 
-                    {d.last_ingested_at && (<div style={styles.muted}>Last ingested {formatDate(d.last_ingested_at)}</div>)}
-                    {d.error && (<div style={styles.error}>Error: {d.error}</div>)}
-                    
-                    {/* Performance Metrics */}
-                    {showPerf && (
-                      <div style={{ marginTop: 8 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <span style={{ fontSize: 11, color: "rgba(148, 163, 184, 0.7)" }}>⚡</span>
-                          <span style={{ fontSize: 12, fontWeight: 600, color: "#c7d7ff" }}>
-                            {perf.total_time_sec.toFixed(1)}s
+                    {(d.last_ingested_at || showPerf) && (
+                      <>
+                        <div style={styles.docIngestRow}>
+                          <span style={styles.docIngestInfo}>
+                            {d.last_ingested_at ? `Ingested ${formatDate(d.last_ingested_at)}` : "Ingestion details pending"}
+                            {showPerf && (
+                              <>
+                                {" • "}
+                                <span style={{ fontSize: 11 }}>⚡</span>
+                                <span style={{ fontWeight: 600, marginLeft: 4 }}>{perf.total_time_sec.toFixed(1)}s</span>
+                              </>
+                            )}
                           </span>
-                          <button
-                            onClick={() => {
-                              const newSet = new Set(expandedPerf);
-                              if (isExpanded) newSet.delete(d.hash);
-                              else newSet.add(d.hash);
-                              setExpandedPerf(newSet);
-                            }}
-                            style={{
-                              ...styles.subtleButton,
-                              padding: "2px 6px",
-                              fontSize: 11,
-                              marginLeft: 4,
-                              border: "none",
-                              background: "transparent",
-                              color: "rgba(148, 163, 184, 0.7)",
-                            }}
-                            title={isExpanded ? "Hide breakdown" : "Show breakdown"}
-                          >
-                            {isExpanded ? "▼" : "▶"}
-                          </button>
+                          {showPerf && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const newSet = new Set(expandedPerf);
+                                if (isExpanded) newSet.delete(d.hash);
+                                else newSet.add(d.hash);
+                                setExpandedPerf(newSet);
+                              }}
+                              style={{
+                                ...styles.docPerfToggle,
+                                ...(isExpanded ? styles.docPerfToggleActive : {}),
+                              }}
+                              title={isExpanded ? "Hide breakdown" : "Show breakdown"}
+                              aria-label={`${isExpanded ? "Hide" : "Show"} ingestion breakdown`}
+                            >
+                              {isExpanded ? "▲" : "▼"}
+                            </button>
+                          )}
                         </div>
-                        
-                        {isExpanded && (
-                          <div style={{ marginTop: 6, marginLeft: 20, fontSize: 11, color: "rgba(148, 163, 184, 0.85)", lineHeight: 1.6 }}>
+
+                        {showPerf && isExpanded && (
+                          <div style={styles.docPerfDetails}>
                             {perf.pymupdf_time_sec != null && (
                               <div>• PyMuPDF: {perf.pymupdf_time_sec.toFixed(2)}s</div>
                             )}
@@ -562,8 +568,9 @@ export default function IngestPage({ systemStatus = {} }) {
                             )}
                           </div>
                         )}
-                      </div>
+                      </>
                     )}
+                    {d.error && (<div style={styles.error}>Error: {d.error}</div>)}
 
                     {showRetry && (
                       <div style={styles.docActions}>
