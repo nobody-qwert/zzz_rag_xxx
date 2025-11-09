@@ -472,6 +472,44 @@ async def list_docs() -> List[Dict[str, Any]]:
     return result
 
 
+@app.delete("/documents/{doc_hash}")
+async def delete_document(doc_hash: str) -> Dict[str, Any]:
+    doc = await document_store.get_document(doc_hash)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    active_jobs = [
+        jid for jid, info in jobs.items()
+        if info.get("hash") == doc_hash and info.get("status") in {"queued", "running"}
+    ]
+    if active_jobs:
+        raise HTTPException(status_code=409, detail="Document is currently processing and cannot be removed")
+
+    stored_name = doc.get("stored_name") or doc_hash
+    file_path = DATA_DIR / stored_name
+    file_removed = False
+    if file_path.exists():
+        try:
+            file_path.unlink()
+            file_removed = True
+        except Exception as exc:
+            logger.warning("Failed to delete stored file %s: %s", file_path, exc)
+
+    deleted = await document_store.delete_document(doc_hash)
+    removed_jobs: List[str] = []
+    for jid, info in list(jobs.items()):
+        if info.get("hash") == doc_hash:
+            removed_jobs.append(jid)
+            jobs.pop(jid, None)
+
+    return {
+        "hash": doc_hash,
+        "deleted": bool(deleted),
+        "file_removed": file_removed,
+        "removed_jobs": removed_jobs,
+    }
+
+
 @app.get("/parsers")
 async def list_parsers() -> Dict[str, Any]:
     options = _unique_ordered([OCR_PARSER_KEY, "pymupdf"])

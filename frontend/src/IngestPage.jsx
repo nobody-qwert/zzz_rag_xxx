@@ -36,11 +36,13 @@ const styles = {
   docs: { maxHeight: "55vh", overflow: "auto", border: "1px solid rgba(148, 163, 184, 0.12)", borderRadius: 0, padding: 12, background: "rgba(9, 11, 18, 0.75)" },
   listItem: { padding: "14px 12px", borderRadius: 0, background: "rgba(23, 25, 35, 0.75)", border: "1px solid rgba(148, 163, 184, 0.08)", marginBottom: 10, display: "flex", flexDirection: "column", gap: 8 },
   docTitleRow: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 },
+  docTitleActions: { display: "flex", alignItems: "center", gap: 8, flexShrink: 0 },
   docName: { fontSize: 15, fontWeight: 600, color: "rgba(226, 232, 240, 0.95)", margin: 0, wordBreak: "break-word" },
   docStatusPill: { fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, padding: "2px 8px", borderRadius: 999, border: "1px solid rgba(148, 163, 184, 0.22)", color: "rgba(148, 163, 184, 0.85)" },
   docMetaRow: { display: "flex", flexWrap: "wrap", gap: 12, fontSize: 12, color: "rgba(148, 163, 184, 0.9)", marginTop: 4 },
   docMetaItem: { whiteSpace: "nowrap" },
   docActions: { display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 },
+  dangerIconButton: { font: "inherit", fontSize: 16, lineHeight: 1, width: 26, height: 26, borderRadius: 20, border: "1px solid rgba(239, 68, 68, 0.7)", background: "rgba(69, 10, 10, 0.65)", color: "rgba(248, 250, 252, 0.9)", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0 },
   muted: { opacity: 0.75, fontSize: 13, color: "rgba(148, 163, 184, 0.8)" },
   error: { fontSize: 13, color: "#ff8f8f", marginTop: 6 },
 };
@@ -66,6 +68,7 @@ export default function IngestPage({ systemStatus = {} }) {
   const [uploadProgress, setUploadProgress] = useState([]);
   const [activeJobs, setActiveJobs] = useState(new Set());
   const [retryingHash, setRetryingHash] = useState(null);
+  const [deletingHash, setDeletingHash] = useState(null);
   const [selectedDoc, setSelectedDoc] = useState(null);
   const [preview, setPreview] = useState("");
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -207,6 +210,41 @@ export default function IngestPage({ systemStatus = {} }) {
     catch (e) { setUploadStatus(`Retry failed: ${e.message || String(e)}`); }
     finally { setRetryingHash(null); }
   }, [api, refreshDocs]);
+
+  const handleDeleteDoc = useCallback(async (doc) => {
+    if (!doc?.hash) return;
+    const hash = doc.hash;
+    const displayName = doc.name || doc.stored_name || shortHash(hash);
+    if (typeof window !== "undefined") {
+      const confirmed = window.confirm(`Remove "${displayName}" and all derived data? This cannot be undone.`);
+      if (!confirmed) return;
+    }
+
+    setDeletingHash(hash);
+    setUploadStatus(`Removing ${displayName}...`);
+    try {
+      const res = await fetch(`${api.docs}/${hash}`, { method: "DELETE" });
+      const data = await readJsonSafe(res);
+      if (!res.ok) throw new Error((data && (data.detail || data.error || data.raw)) || res.statusText);
+      setUploadStatus(`Removed ${displayName}.`);
+      if (selectedDoc && selectedDoc.hash === hash) {
+        setSelectedDoc(null);
+        setPreview("");
+        setPreviewInfo(null);
+        setPreviewError("");
+      }
+      setExpandedPerf(prev => {
+        const next = new Set(prev);
+        next.delete(hash);
+        return next;
+      });
+      await refreshDocs();
+    } catch (err) {
+      setUploadStatus(`Remove failed: ${err.message || String(err)}`);
+    } finally {
+      setDeletingHash(null);
+    }
+  }, [api.docs, refreshDocs, selectedDoc]);
 
   const handlePreview = useCallback(async (doc) => {
     if (!doc || !doc.hash) return; setSelectedDoc(doc); setPreview(""); setPreviewError(""); setPreviewInfo(null); setPreviewLoading(true);
@@ -423,6 +461,7 @@ export default function IngestPage({ systemStatus = {} }) {
                 const canPreviewInHeader = Boolean(d.hash && !isErrored && !isInProgress);
                 const showStatusPill = !canPreviewInHeader;
                 const showRetry = isErrored && Boolean(d.hash);
+                const isDeleting = deletingHash === d.hash;
                 
                 return (
                   <li key={d.hash || d.stored_name || d.name} style={styles.listItem}>
@@ -430,18 +469,30 @@ export default function IngestPage({ systemStatus = {} }) {
                       <div style={{ flex: 1 }}>
                         <div style={styles.docName}>{d.name || d.stored_name || "Untitled document"}</div>
                       </div>
-                      {canPreviewInHeader ? (
+                      <div style={styles.docTitleActions}>
+                        {canPreviewInHeader ? (
+                          <button
+                            style={styles.subtleButton}
+                            onClick={() => handlePreview(d)}
+                            disabled={previewLoading && selectedDoc && selectedDoc.hash === d.hash}
+                            title="Preview extracted text"
+                          >
+                            {previewLoading && selectedDoc && selectedDoc.hash === d.hash ? "Loading…" : "Preview"}
+                          </button>
+                        ) : showStatusPill ? (
+                          <span style={styles.docStatusPill}>{statusLabel.toUpperCase()}</span>
+                        ) : null}
                         <button
-                          style={styles.subtleButton}
-                          onClick={() => handlePreview(d)}
-                          disabled={previewLoading && selectedDoc && selectedDoc.hash === d.hash}
-                          title="Preview extracted text"
+                          type="button"
+                          style={{ ...styles.dangerIconButton, opacity: isDeleting ? 0.5 : 1 }}
+                          onClick={() => handleDeleteDoc(d)}
+                          disabled={isDeleting}
+                          title="Remove document"
+                          aria-label={`Remove ${d.name || d.stored_name || "document"}`}
                         >
-                          {previewLoading && selectedDoc && selectedDoc.hash === d.hash ? "Loading…" : "Preview"}
+                          ×
                         </button>
-                      ) : showStatusPill ? (
-                        <span style={styles.docStatusPill}>{statusLabel.toUpperCase()}</span>
-                      ) : null}
+                      </div>
                     </div>
 
                     <div style={styles.docMetaRow}>

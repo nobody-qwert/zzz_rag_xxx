@@ -253,6 +253,15 @@ class DocumentStore:
         finally:
             await conn.close()
 
+    async def delete_document(self, doc_hash: str) -> bool:
+        conn = await self._conn()
+        try:
+            cur = await conn.execute("DELETE FROM documents WHERE doc_hash=?", (doc_hash,))
+            await conn.commit()
+            return cur.rowcount > 0
+        finally:
+            await conn.close()
+
     # Jobs
     async def create_job(self, job_id: str, doc_hash: str) -> None:
         conn = await self._conn()
