@@ -91,13 +91,9 @@ Nodes marked with <sup>1</sup> or <sup>2</sup> have dedicated detail diagrams in
 ```mermaid
 flowchart TD
     INTENT[Intent classification LLM]
-    CATS[Doc category hints]
-    COVERAGE[Annotation coverage & tool health]
     HISTORY[Conversation summary / follow-up cues]
 
     INTENT --> PROMPT[Assemble route-selection prompt]
-    CATS --> PROMPT
-    COVERAGE --> PROMPT
     HISTORY --> PROMPT
 
     PROMPT --> LLM[LLM route planner]
