@@ -12,20 +12,19 @@ This document outlines a generic agentic retrieval flow for a heterogeneous corp
 
 ## 2. Workflow Steps
 1. **Preprocess Query**
-   - Normalize string; detect keywords, operators, measurement units, time ranges.
+   - Normalize string; detect keywords, operators, measurement units, and time ranges.
    - Classify intent: enumeration, numeric lookup, conceptual explanation.
+   - Use a rolling conversation summary (≤300–400 tokens) to resolve pronouns (“those specs”) while honoring explicit “new topic” resets so the small model does not ingest stale context.
 
 2. **Route Selection**
-   - Use intent + doc category hints to choose retrieval plan:
-     - Structured route (annotations) for enumerations/data-heavy docs.
-     - Hybrid (annotations + text) when coverage uncertain.
-     - Long-text route (summary + segment vectors) for conceptual/manual queries.
+   - Combine intent, doc category hints, annotation coverage stats, and conversation summary signals to choose the retrieval plan.
+   - Structured route (annotations) for enumerations/data-heavy docs; hybrid route (annotations + text) when coverage is uncertain; long-text route (summary + segment vectors) for conceptual/manual queries.
 
 3. **Tool Planning**
    - Structured route → `annotations_search`, `annotations_aggregate` (filters via properties/typed props).
    - Text route → `search_text` constrained by doc categories.
    - Long-text route → `search_vector(scope=summary)` then `scope=segment` for drill-down.
-   - Always keep fallbacks queued (e.g., run vector search if annotations yield sparse results).
+   - Each planner instance pre-allocates fallback steps (e.g., widen filters, add vector search) that can be triggered when evidence is insufficient.
 
 4. **Execute Structured Queries**
    - Example (“receipts containing tires”): search row annotations where `properties.item_desc~tires`, restricted to doc category “short/data-heavy” and the requested date range.
@@ -45,45 +44,75 @@ This document outlines a generic agentic retrieval flow for a heterogeneous corp
 
 8. **Answer Generation & Continuation**
    - Run local LLM; ensure citations `[source N]` per snippet/row.
-   - If finish_reason != stop, use continuation path (reuse last question, trimmed context).
+   - Clip inputs to a small context window, keeping only the latest answer plus the rolling summary for continuity.
+   - If `finish_reason != stop`, use continuation path (reuse last question, trimmed context).
+   - Update the short conversation summary and store any structured result IDs for follow-up commands (“show the rest”, “export that table”).
 
 9. **Post-processing**
    - Return answer, sources, structured payload (for UI/CSV), router decision metadata.
-   - Update conversation history, summary.
+   - Persist router decisions, snippet IDs, and clarification prompts for debugging and analytics.
 
-10. **Fallbacks & Logging**
-    - If no results, relax filters or ask user for clarification.
-    - Log router decisions, tool latencies, snippet IDs for debugging.
+10. **Fallbacks, Clarifications & Logging**
+    - Detect zero hits or low-confidence evidence after each retrieval batch; auto-relax filters (categories, score cutoffs, time windows) before bothering the user.
+    - If results remain empty, ask the user for more details (synonyms, doc types, timeframes), then restart at preprocessing with the clarified input.
+    - Log every fallback path, clarification, and rerun so troubleshooting can trace the conversation.
 
-## 3. Mermaid Diagram
+## 3. High-Level Workflow Diagram
 ```mermaid
-flowchart TD
-    Q[User Query] --> P[Preprocess & Intent Detection]
-    P --> R{Route Selection}
-    R -->|Structured| TS[Plan annotations_search / aggregate]
-    R -->|Hybrid| HY[Plan annotations + text/vector]
-    R -->|Long Text| LT[Plan summary/segment vector search]
-
-    TS --> A1[Run annotations_search]
-    HY --> A1
-    HY --> T1[Run search_text]
-    LT --> SV["search_vector (scope=summary)"]
-    SV --> SS["Fetch segments & run search_vector (scope=segment)"]
-
-    A1 --> EV[Assemble structured rows]
-    T1 --> EV
-    SS --> EV
-
-    EV --> CT[Compress & Build Context Bundle]
-    CT --> LLM[LLM Answer Generation]
-    LLM -->|Needs continuation?| CONT{Truncated?}
-    CONT -->|Yes| CONTINUE[Run continuation with trimmed context]
-    CONT -->|No| OUT[Answer + Sources + Structured Payload]
-    CONTINUE --> OUT
-
-    OUT --> LOG[Update history, log metrics, return response]
+flowchart LR
+    UQ[User Query] --> PRE[Preprocess & intent detection]
+    PRE --> ROUTE[Route selection & tool plan]
+    ROUTE --> EXEC[Execute retrieval tools]
+    EXEC --> EVAL{Enough evidence?}
+    EVAL -->|No| CLARIFY[Clarify user / relax search scope]
+    CLARIFY --> PRE
+    EVAL -->|Yes| BUNDLE[Assemble & compress evidence]
+    BUNDLE --> PROMPT[Prompt LLM & craft answer]
+    PROMPT --> POST[Post-process, log, update convo state]
+    POST --> NEXT[Next user turn]
 ```
 
-## 4. Notes
+## 4. Route Selection Detail
+```mermaid
+flowchart TD
+    INTENT[Intent classification]
+    CATS[Doc category hints]
+    COVERAGE[Annotation coverage & tool health]
+    HISTORY[Conversation summary / follow-up cues]
+
+    INTENT --> SCORE[Route scoring rules]
+    CATS --> SCORE
+    COVERAGE --> SCORE
+    HISTORY --> SCORE
+
+    SCORE -->|Structured| STRUCT_ROUTE[Plan annotations_search + aggregate]
+    SCORE -->|Hybrid| HYBRID_ROUTE[Plan annotations + vector/text search]
+    SCORE -->|Long text| LONG_ROUTE[Plan summary + segment vector search]
+
+    STRUCT_ROUTE --> CHECK{Results sufficient?}
+    HYBRID_ROUTE --> CHECK
+    LONG_ROUTE --> CHECK
+
+    CHECK -->|No| FALLBACK[Queue next-best route or ask clarification]
+    FALLBACK --> SCORE
+    CHECK -->|Yes| EXECUTE[Execute selected plan]
+```
+
+## 5. Clarification & Multi-turn Loop
+```mermaid
+flowchart TD
+    DETECT[Detect zero hits / low confidence]
+    DETECT --> AUTORELAX[Auto-relax filters & thresholds]
+    AUTORELAX --> RETRY{Still empty?}
+
+    RETRY -->|No| RERUN[Rerun router with relaxed scope]
+    RERUN --> PREPROCESS[Return to preprocess step]
+
+    RETRY -->|Yes| ASK[Ask user for clarification]
+    ASK --> CAPTURE[Capture new constraints + update summary]
+    CAPTURE --> PREPROCESS
+```
+
+## 6. Notes
 - Structured responses expose CSV export endpoints when row count exceeds UI limits.
 - Router configuration uses rule-based dispatch keyed by document categories and intent signals.
