@@ -63,16 +63,27 @@ This document outlines a generic agentic retrieval flow for a heterogeneous corp
 ```mermaid
 flowchart LR
     UQ[User Query] --> PRE[Preprocess & intent detection]
-    PRE --> ROUTE[Route selection & tool plan]
+    PRE --> ROUTE[Route selection & tool plan<sup>1</sup>]
     ROUTE --> EXEC[Execute retrieval tools]
     EXEC --> EVAL{Enough evidence?}
-    EVAL -->|No| CLARIFY[Clarify user / relax search scope]
+    EVAL -->|No| CLARIFY[Clarify user / relax search scope<sup>2</sup>]
     CLARIFY --> PRE
     EVAL -->|Yes| BUNDLE[Assemble & compress evidence]
     BUNDLE --> PROMPT[Prompt LLM & craft answer]
     PROMPT --> POST[Post-process, log, update convo state]
     POST --> NEXT[Next user turn]
+
+    style PRE fill:#fef9c3,stroke:#d97706,color:#000
+    style ROUTE fill:#fef9c3,stroke:#d97706,color:#000,stroke-width:4px
+    style EXEC fill:#fef9c3,stroke:#d97706,color:#000
+    style EVAL fill:#fef9c3,stroke:#d97706,color:#000
+    style CLARIFY fill:#fef9c3,stroke:#d97706,color:#000,stroke-width:4px
+    style BUNDLE fill:#fef9c3,stroke:#d97706,color:#000
+    style PROMPT fill:#dcfce7,stroke:#15803d,color:#000
+    style POST fill:#fef9c3,stroke:#d97706,color:#000
 ```
+
+Nodes marked with <sup>1</sup> or <sup>2</sup> have dedicated detail diagrams in the sections below.
 
 ## 4. Route Selection Detail
 ```mermaid
@@ -101,6 +112,16 @@ flowchart TD
     CHECK -->|No| FALLBACK[Queue next-best route or ask clarification]
     FALLBACK --> SCORE
     CHECK -->|Yes| EXECUTE[Execute selected plan]
+
+    style PROMPT fill:#fef9c3,stroke:#d97706,color:#000
+    style LLM fill:#dcfce7,stroke:#15803d,color:#000
+    style SCORE fill:#fef9c3,stroke:#d97706,color:#000
+    style STRUCT_ROUTE fill:#fef9c3,stroke:#d97706,color:#000
+    style HYBRID_ROUTE fill:#fef9c3,stroke:#d97706,color:#000
+    style LONG_ROUTE fill:#fef9c3,stroke:#d97706,color:#000
+    style CHECK fill:#fef9c3,stroke:#d97706,color:#000
+    style FALLBACK fill:#fef9c3,stroke:#d97706,color:#000
+    style EXECUTE fill:#fef9c3,stroke:#d97706,color:#000
 ```
 
 ## 5. Clarification & Multi-turn Loop
@@ -116,6 +137,14 @@ flowchart TD
     RETRY -->|Yes| ASK[Ask user for clarification]
     ASK --> CAPTURE[Capture new constraints + update summary]
     CAPTURE --> PREPROCESS
+
+    style DETECT fill:#fef9c3,stroke:#d97706,color:#000
+    style AUTORELAX fill:#fef9c3,stroke:#d97706,color:#000
+    style RETRY fill:#fef9c3,stroke:#d97706,color:#000
+    style RERUN fill:#fef9c3,stroke:#d97706,color:#000
+    style PREPROCESS fill:#fef9c3,stroke:#d97706,color:#000
+    style ASK fill:#dcfce7,stroke:#15803d,color:#000
+    style CAPTURE fill:#fef9c3,stroke:#d97706,color:#000
 ```
 
 ## 6. Prompt Templates
