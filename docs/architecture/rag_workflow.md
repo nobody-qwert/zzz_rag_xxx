@@ -38,10 +38,12 @@ This document outlines a generic agentic retrieval flow for a heterogeneous corp
 6. **Assemble Evidence**
    - Deduplicate by doc; keep multiple references when meaningful.
    - Build structured tables (rows with doc refs) and textual snippets; include source IDs, doc titles, page numbers.
+   - When raw matches exceed `max_rows_per_answer` / `max_snippets_per_answer`, persist the full result set for pagination/export and keep only the highest-scoring slice for the current turn.
 
 7. **Prompt Construction**
    - Compress structured results into compact markdown/CSV-style blocks (limit rows, mention export option when large).
    - Combine textual snippets (top N) and summary context; enforce token budget.
+   - If truncation occurred, note the overflow count and prime the clarification stage so the user can narrow scope (“filter by vendor?”) before another full rerun.
    - Prompt template: system instructions + context bundle + user question.
 
 8. **Answer Generation & Continuation**
@@ -55,9 +57,9 @@ This document outlines a generic agentic retrieval flow for a heterogeneous corp
    - Persist router decisions, snippet IDs, and clarification prompts for debugging and analytics.
 
 10. **Fallbacks, Clarifications & Logging**
-    - Detect zero hits or low-confidence evidence after each retrieval batch; auto-relax filters (categories, score cutoffs, time windows) before bothering the user.
-    - If results remain empty, ask the user for more details (synonyms, doc types, timeframes), then restart at preprocessing with the clarified input.
-    - Log every fallback path, clarification, and rerun so troubleshooting can trace the conversation.
+    - Detect zero hits, low-confidence evidence, or overwhelming hit counts after each retrieval batch; auto-relax filters (categories, score cutoffs, time windows) before bothering the user.
+    - If results remain empty, or if the hit count still exceeds the prompt budget, ask the user for more details (synonyms, doc types, timeframes, filters) and then restart at preprocessing with the clarified input.
+    - Log every fallback path, clarification, overflow summary, and rerun so troubleshooting can trace the conversation.
 
 ## 3. High-Level Workflow Diagram
 ```mermaid
@@ -65,7 +67,7 @@ flowchart LR
     UQ[User Query] --> PRE[Preprocess & intent detection]
     PRE --> ROUTE[Route selection & tool plan<sup>1</sup>]
     ROUTE --> EXEC[Execute retrieval tools]
-    EXEC --> EVAL{Enough evidence?}
+    EXEC --> EVAL{Sufficient, manageable evidence?}
     EVAL -->|No| CLARIFY[Clarify user / relax search scope<sup>2</sup>]
     CLARIFY --> PRE
     EVAL -->|Yes| BUNDLE[Assemble & compress evidence]
@@ -127,9 +129,9 @@ flowchart TD
 ## 5. Clarification & Multi-turn Loop
 ```mermaid
 flowchart TD
-    DETECT[Detect zero hits / low confidence]
+    DETECT[Detect zero hits / low confidence / overload]
     DETECT --> AUTORELAX[Auto-relax filters & thresholds]
-    AUTORELAX --> RETRY{Still empty?}
+    AUTORELAX --> RETRY{Still unresolved?}
 
     RETRY -->|No| RERUN[Rerun router with relaxed scope]
     RERUN --> PREPROCESS[Return to preprocess step]
@@ -162,24 +164,35 @@ Respond with JSON: {"route": "...", "fallbacks": ["...","..."], "reason": "..."}
 ```
 
 2. **Clarification Prompt**
-   - Triggered after auto-relaxation still yields zero evidence. The prompt enumerates what was already tried so the user can add constraints or synonyms.
+   - Triggered when auto-relaxation still yields zero/low-confidence evidence or when the hit count exceeds the prompt budget. The prompt explains the situation so the user can refine scope (add terms, filters, priority ranges).
 ```text
-System: No evidence was found. Summarize the failed searches and ask for targeted clarification.
+System: Retrieval cannot proceed with the current scope (Reason: {{reason_summary}}). Summarize what was tried and ask for targeted clarification.
 User question: {{question}}
 Attempts tried:
 - {{attempt_1}} (matches: {{match_count_1}}, threshold: {{threshold_1}})
 - {{attempt_2}} ...
-Please ask the user for: {{intent_specific_hints}} (e.g., alternate terms, product IDs, timeframe, acceptable ranges).
-Offer example follow-ups such as “search all documents” or “switch to text search” when appropriate.
+Result summary: {{result_summary}} (e.g., 0 matches, or 1,024 matches > 200 limit)
+Please ask the user for: {{intent_specific_hints}} (e.g., alternate terms, product IDs, timeframe, acceptable ranges, filters).
+Offer example follow-ups such as “search all documents”, “filter by vendor ACME”, or “switch to text search” when appropriate.
 ```
-   - Example (numeric lookup intent):
+   - Example (numeric lookup intent, zero hits):
 ```text
-System: No evidence was found. Summarize the failed searches and ask for targeted clarification.
+System: Retrieval cannot proceed with the current scope (Reason: no width entries matched). Summarize what was tried and ask for targeted clarification.
 User question: “What is the minimum panel width for AlphaSolar models?”
 Attempts tried:
 - annotations_search label~"width" doc_category=data-heavy (matches: 0, threshold: exact match)
 - summary vectors query="AlphaSolar width" (matches: 0, threshold: cosine>=0.4)
 Please ask the user for: alternate model names, acceptable width ranges in meters, or specific upload dates. Offer example follow-ups such as “search all documents” or “switch to text search” when appropriate.
+```
+   - Example (enumeration intent, overflow hits):
+```text
+System: Retrieval cannot proceed with the current scope (Reason: 1,042 matching receipts > 50 snippet limit). Summarize what was tried and ask for targeted clarification.
+User question: “List every tire purchase receipt.”
+Attempts tried:
+- annotations_search properties.item_desc~"tire" date>=2023 (matches: 1,042, threshold: top 50)
+- search_text query="tire receipt" categories=short (matches: 987, threshold: top 40)
+Result summary: 1,042 candidate rows stored for export.
+Please ask the user for: date ranges, vendor names, or quantity thresholds. Offer example follow-ups such as “filter to 2024 only” or “export the full CSV”.
 ```
 
 3. **Answer Generation Prompt**
