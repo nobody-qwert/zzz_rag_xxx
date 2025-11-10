@@ -17,7 +17,8 @@ This document outlines a generic agentic retrieval flow for a heterogeneous corp
    - Use a rolling conversation summary (≤300–400 tokens) to resolve pronouns (“those specs”) while honoring explicit “new topic” resets so the small model does not ingest stale context.
 
 2. **Route Selection**
-   - Combine intent, doc category hints, annotation coverage stats, and conversation summary signals to choose the retrieval plan.
+   - Package the normalized question, conversation summary, candidate intents, document-category stats, and tool-health metrics into a dedicated route-selection prompt.
+   - A lightweight LLM call scores the available routes (structured / hybrid / long-text) and outputs the top choice plus an ordered fallback list that downstream planners can execute.
    - Structured route (annotations) for enumerations/data-heavy docs; hybrid route (annotations + text) when coverage is uncertain; long-text route (summary + segment vectors) for conceptual/manual queries.
 
 3. **Tool Planning**
@@ -25,10 +26,11 @@ This document outlines a generic agentic retrieval flow for a heterogeneous corp
    - Text route → `search_text` constrained by doc categories.
    - Long-text route → `search_vector(scope=summary)` then `scope=segment` for drill-down.
    - Each planner instance pre-allocates fallback steps (e.g., widen filters, add vector search) that can be triggered when evidence is insufficient.
+   - Annotation search operates on both metadata filters and an embedding index over serialized key/value text so fuzzy label matches (“qty”, “quantity”, etc.) can be retrieved without exact keyword overlap.
 
 4. **Execute Structured Queries**
    - Example (“receipts containing tires”): search row annotations where `properties.item_desc~tires`, restricted to doc category “short/data-heavy” and the requested date range.
-   - Example (“solar panels width <= 1.2m”): search key-value annotations whose field label contains “width” or “height” and apply numeric filters on `properties.value_num`; fall back to summary/vector search when no structured facts exist for a model.
+   - Example (“solar panels width <= 1.2m”): search key-value annotations whose field label contains “width” or “height” (lexical OR embedding similarity) and apply numeric filters on `properties.value_num`; fall back to summary/vector search when no structured facts exist for a model.
 
 5. **Long-text Retrieval**
    - Run summary-level embedding search; pick top summaries, fetch child segments; run a local vector search within each doc to refine snippets.
@@ -80,10 +82,13 @@ flowchart TD
     COVERAGE[Annotation coverage & tool health]
     HISTORY[Conversation summary / follow-up cues]
 
-    INTENT --> SCORE[Route scoring rules]
-    CATS --> SCORE
-    COVERAGE --> SCORE
-    HISTORY --> SCORE
+    INTENT --> PROMPT[Assemble route-selection prompt]
+    CATS --> PROMPT
+    COVERAGE --> PROMPT
+    HISTORY --> PROMPT
+
+    PROMPT --> LLM[LLM route planner]
+    LLM --> SCORE[Ranked routes + fallbacks]
 
     SCORE -->|Structured| STRUCT_ROUTE[Plan annotations_search + aggregate]
     SCORE -->|Hybrid| HYBRID_ROUTE[Plan annotations + vector/text search]
@@ -113,6 +118,44 @@ flowchart TD
     CAPTURE --> PREPROCESS
 ```
 
-## 6. Notes
+## 6. Prompt Templates
+1. **Route Selection Prompt**
+   - Purpose: let a lightweight LLM decide among structured / hybrid / long-text routes using the latest question, conversation summary, document inventory, and tool health.
+   - Template:
+```text
+System: You are a retrieval router. Choose the best plan for the small RAG system. 
+Conversation summary: {{summary<=350 tokens}}
+User question: {{question}}
+Candidate intents: {{["enumeration","numeric_lookup","conceptual"]}}
+Doc stats: {{category_counts}}
+Annotation coverage: {{coverage_pct}}
+Tool health: {{status per tool}}
+Respond with JSON: {"route": "...", "fallbacks": ["...","..."], "reason": "..."}
+```
+
+2. **Clarification Prompt**
+   - Triggered after auto-relaxation still yields zero evidence. The prompt enumerates what was already tried so the user can add constraints or synonyms.
+```text
+System: Explain briefly what was searched and ask for the next clue.
+User context: {{question}}
+Attempts: {{["annotations search (width)", "summary vectors (score<0.35)"]}}
+Ask for: additional terms, doc types, timeframe.
+```
+
+3. **Answer Generation Prompt**
+   - Consumes the compressed context bundle (structured rows + snippets) and enforces citations plus brevity for the small model.
+```text
+System: Answer using only the provided context. Cite every claim as [source N]. 
+Structured rows (may be empty): 
+{{table_block}}
+
+Snippets:
+{{snippet_block}}
+
+Question: {{question}}
+If insufficient information, say so and suggest what to provide next.
+```
+
+## 7. Notes
 - Structured responses expose CSV export endpoints when row count exceeds UI limits.
 - Router configuration uses rule-based dispatch keyed by document categories and intent signals.
