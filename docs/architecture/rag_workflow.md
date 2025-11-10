@@ -13,7 +13,7 @@ This document outlines a generic agentic retrieval flow for a heterogeneous corp
 ## 2. Workflow Steps
 1. **Preprocess Query**
    - Normalize string; detect keywords, operators, measurement units, and time ranges.
-   - Classify intent: enumeration, numeric lookup, conceptual explanation.
+   - Classify intent via a lightweight LLM prompt that returns one of {enumeration, numeric_lookup, conceptual} plus a short rationale; heuristics (regex/unit detection) supply features to that prompt.
    - Use a rolling conversation summary (≤300–400 tokens) to resolve pronouns (“those specs”) while honoring explicit “new topic” resets so the small model does not ingest stale context.
 
 2. **Route Selection**
@@ -90,7 +90,7 @@ Nodes marked with <sup>1</sup> or <sup>2</sup> have dedicated detail diagrams in
 ## 4. Route Selection Detail
 ```mermaid
 flowchart TD
-    INTENT[Intent classification]
+    INTENT[Intent classification LLM]
     CATS[Doc category hints]
     COVERAGE[Annotation coverage & tool health]
     HISTORY[Conversation summary / follow-up cues]
@@ -115,6 +115,7 @@ flowchart TD
     FALLBACK --> SCORE
     CHECK -->|Yes| EXECUTE[Execute selected plan]
 
+    style INTENT fill:#dcfce7,stroke:#15803d,color:#000
     style PROMPT fill:#fef9c3,stroke:#d97706,color:#000
     style LLM fill:#dcfce7,stroke:#15803d,color:#000
     style SCORE fill:#fef9c3,stroke:#d97706,color:#000
@@ -150,7 +151,16 @@ flowchart TD
 ```
 
 ## 6. Prompt Templates
-1. **Route Selection Prompt**
+1. **Intent Classification Prompt**
+   - Purpose: have a tiny LLM categorize the user question into the canonical intents while keeping tokens minimal.
+```text
+System: Classify the user question for routing. Choose exactly one intent and explain briefly.
+Conversation summary: {{summary<=200 tokens}}
+User question: {{question}}
+Output JSON: {"intent": "enumeration|numeric_lookup|conceptual", "reason": "..."}
+```
+
+2. **Route Selection Prompt**
    - Purpose: let a lightweight LLM decide among structured / hybrid / long-text routes using the latest question, conversation summary, document inventory, and tool health.
    - Template:
 ```text
@@ -162,7 +172,7 @@ Annotation coverage: {{coverage_pct}}
 Respond with JSON: {"route": "...", "reason": "..."}
 ```
 
-2. **Clarification Prompt – No/Low Results**
+3. **Clarification Prompt – No/Low Results**
    - Triggered when auto-relaxation still yields zero or low-confidence evidence. Use it to explain that nothing matched and request more precise constraints.
 ```text
 System: Retrieval cannot proceed with the current scope (Reason: {{reason_summary}}). Summarize what was tried and ask for targeted clarification.
@@ -184,7 +194,7 @@ Attempts tried:
 Please ask the user for: alternate model names, acceptable width ranges in meters, or specific upload dates. Offer example follow-ups such as “search all documents” or “switch to text search” when appropriate.
 ```
 
-3. **Clarification Prompt – Result Overload**
+4. **Clarification Prompt – Result Overload**
    - Triggered when the hit count exceeds the prompt budget even after auto-relaxation. Ask the user to narrow scope or choose an export.
 ```text
 System: Retrieval produced too many matches to summarize (Reason: {{reason_summary}}). Summarize what was tried and ask for targeted filters.
@@ -207,7 +217,7 @@ Result summary: 1,042 candidate rows stored for export.
 Please ask the user for: date ranges, vendor names, or quantity thresholds. Offer example follow-ups such as “filter to 2024 only” or “export the full CSV”.
 ```
 
-4. **Answer Generation Prompt**
+5. **Answer Generation Prompt**
    - Consumes the compressed context bundle (structured rows + snippets) and enforces citations plus brevity for the small model.
 ```text
 System: You must answer only with the evidence provided below. Cite every statement as [source N]. If the context is insufficient, say so and list what is missing.
