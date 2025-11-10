@@ -126,8 +126,7 @@ flowchart TD
 System: You are a retrieval router. Choose the best plan for the small RAG system. 
 Conversation summary: {{summary<=350 tokens}}
 User question: {{question}}
-Candidate intents: {{["enumeration","numeric_lookup","conceptual"]}}
-Doc stats: {{category_counts}}
+Detected intent: {{intent_label}}
 Annotation coverage: {{coverage_pct}}
 Tool health: {{status per tool}}
 Respond with JSON: {"route": "...", "fallbacks": ["...","..."], "reason": "..."}
@@ -136,24 +135,38 @@ Respond with JSON: {"route": "...", "fallbacks": ["...","..."], "reason": "..."}
 2. **Clarification Prompt**
    - Triggered after auto-relaxation still yields zero evidence. The prompt enumerates what was already tried so the user can add constraints or synonyms.
 ```text
-System: Explain briefly what was searched and ask for the next clue.
-User context: {{question}}
-Attempts: {{["annotations search (width)", "summary vectors (score<0.35)"]}}
-Ask for: additional terms, doc types, timeframe.
+System: No evidence was found. Summarize the failed searches and ask for targeted clarification.
+User question: {{question}}
+Attempts tried:
+- {{attempt_1}} (matches: {{match_count_1}}, threshold: {{threshold_1}})
+- {{attempt_2}} ...
+Please ask the user for: {{intent_specific_hints}} (e.g., alternate terms, product IDs, timeframe, acceptable ranges).
+Offer example follow-ups such as “search all documents” or “switch to text search” when appropriate.
+```
+   - Example (numeric lookup intent):
+```text
+System: No evidence was found. Summarize the failed searches and ask for targeted clarification.
+User question: “What is the minimum panel width for AlphaSolar models?”
+Attempts tried:
+- annotations_search label~"width" doc_category=data-heavy (matches: 0, threshold: exact match)
+- summary vectors query="AlphaSolar width" (matches: 0, threshold: cosine>=0.4)
+Please ask the user for: alternate model names, acceptable width ranges in meters, or specific upload dates. Offer example follow-ups such as “search all documents” or “switch to text search” when appropriate.
 ```
 
 3. **Answer Generation Prompt**
    - Consumes the compressed context bundle (structured rows + snippets) and enforces citations plus brevity for the small model.
 ```text
-System: Answer using only the provided context. Cite every claim as [source N]. 
-Structured rows (may be empty): 
-{{table_block}}
+System: You must answer only with the evidence provided below. Cite every statement as [source N]. If the context is insufficient, say so and list what is missing.
+
+Structured rows:
+{{table_block}}  (include source IDs)
 
 Snippets:
 {{snippet_block}}
 
 Question: {{question}}
-If insufficient information, say so and suggest what to provide next.
+
+Output: 2-4 concise sentences or a short bullet list + sources. Mention next actions only if data is missing.
 ```
 
 ## 7. Notes
