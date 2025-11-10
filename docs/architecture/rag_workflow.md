@@ -62,41 +62,55 @@ This document outlines a generic agentic retrieval flow for a heterogeneous corp
     - Log every fallback path, clarification, overflow summary, and rerun so troubleshooting can trace the conversation.
 
 ## 3. High-Level Workflow Diagram
+Nodes annotated with `(P#)` correspond to the prompt templates defined in Section 6:
+- (P1) Intent Classification Prompt
+- (P2) Route Selection Prompt
+- (P3) Clarification Prompt – No/Low Results
+- (P4) Clarification Prompt – Result Overload
+- (P5) Answer Generation Prompt
+
 ```mermaid
 flowchart LR
-    UQ[User Query] --> PRE[Preprocess & intent detection]
-    PRE --> ROUTE[Route selection & tool plan<sup>1</sup>]
+    UQ[User Query] --> PRE["Preprocess & intent detection (P1)"]
+    PRE --> ROUTE["Route selection & tool plan (P2)"]
     ROUTE --> EXEC[Execute retrieval tools]
-    EXEC --> EVAL{Sufficient, manageable evidence?}
-    EVAL -->|No| CLARIFY[Clarify user / relax search scope<sup>2</sup>]
-    CLARIFY --> PRE
-    EVAL -->|Yes| BUNDLE[Assemble & compress evidence]
-    BUNDLE --> PROMPT[Prompt LLM & craft answer]
+    EXEC --> EVAL{Evidence status?}
+    EVAL -->|Sufficient + manageable| BUNDLE[Assemble & compress evidence]
+    BUNDLE --> PROMPT["Prompt LLM & craft answer (P5)"]
     PROMPT --> POST[Post-process, log, update convo state]
     POST --> NEXT[Next user turn]
+
+    EVAL -->|Insufficient| RELAX[Auto-relax filters & thresholds]
+    RELAX -->|Recovered evidence| PRE
+    RELAX -->|Still empty| CLAR_NOLOW["Clarify (No/Low results) (P3)"]
+    EVAL -->|Overflow| CLAR_OVERLOAD["Clarify (Result overload) (P4)"]
+    CLAR_NOLOW --> PRE
+    CLAR_OVERLOAD --> PRE
 
     style PRE fill:#fef9c3,stroke:#d97706,color:#000
     style ROUTE fill:#fef9c3,stroke:#d97706,color:#000,stroke-width:4px
     style EXEC fill:#fef9c3,stroke:#d97706,color:#000
     style EVAL fill:#fef9c3,stroke:#d97706,color:#000
-    style CLARIFY fill:#fef9c3,stroke:#d97706,color:#000,stroke-width:4px
+    style RELAX fill:#fef9c3,stroke:#d97706,color:#000
+    style CLAR_NOLOW fill:#dcfce7,stroke:#15803d,color:#000,stroke-width:4px
+    style CLAR_OVERLOAD fill:#dcfce7,stroke:#15803d,color:#000,stroke-width:4px
     style BUNDLE fill:#fef9c3,stroke:#d97706,color:#000
     style PROMPT fill:#dcfce7,stroke:#15803d,color:#000
     style POST fill:#fef9c3,stroke:#d97706,color:#000
 ```
 
-Nodes marked with <sup>1</sup> or <sup>2</sup> have dedicated detail diagrams in the sections below.
+Route selection (P2) and both clarification prompts (P3, P4) have dedicated detail diagrams in the sections below.
 
 ## 4. Route Selection Detail
 ```mermaid
 flowchart TD
-    INTENT[Intent classification LLM]
+    INTENT["Intent classification LLM (P1)"]
     HISTORY[Conversation summary / follow-up cues]
 
     INTENT --> PROMPT[Assemble route-selection prompt]
     HISTORY --> PROMPT
 
-    PROMPT --> LLM[LLM route planner]
+    PROMPT --> LLM["LLM route planner (P2)"]
     LLM --> SCORE[Ranked routes + fallbacks]
 
     SCORE -->|Structured| STRUCT_ROUTE[Plan annotations_search + aggregate]
@@ -124,30 +138,38 @@ flowchart TD
 ```
 
 ## 5. Clarification & Multi-turn Loop
+This loop branches on the root cause so the appropriate clarification prompt (P3 vs P4) is explicit.
 ```mermaid
 flowchart TD
     DETECT[Detect zero hits / low confidence / overload]
     DETECT --> AUTORELAX[Auto-relax filters & thresholds]
-    AUTORELAX --> RETRY{Still unresolved?}
+    AUTORELAX --> CHECK{Resolved without clarification?}
 
-    RETRY -->|No| RERUN[Rerun router with relaxed scope]
-    RERUN --> PREPROCESS[Return to preprocess step]
+    CHECK -->|Yes| PREPROCESS[Return to preprocess step]
+    CHECK -->|No| ISSUE{Issue type?}
+    ISSUE -->|No/Low evidence| ASK_LOW["Clarification (No/Low results) (P3)"]
+    ISSUE -->|Result overload| ASK_OVER["Clarification (Result overload) (P4)"]
 
-    RETRY -->|Yes| ASK[Ask user for clarification]
-    ASK --> CAPTURE[Capture new constraints + update summary]
-    CAPTURE --> PREPROCESS
+    ASK_LOW --> CAPTURE_LOW[Capture new constraints + update summary]
+    ASK_OVER --> CAPTURE_OVER[Capture filters/preferences + update summary]
+
+    CAPTURE_LOW --> PREPROCESS
+    CAPTURE_OVER --> PREPROCESS
 
     style DETECT fill:#fef9c3,stroke:#d97706,color:#000
     style AUTORELAX fill:#fef9c3,stroke:#d97706,color:#000
-    style RETRY fill:#fef9c3,stroke:#d97706,color:#000
-    style RERUN fill:#fef9c3,stroke:#d97706,color:#000
+    style CHECK fill:#fef9c3,stroke:#d97706,color:#000
+    style ISSUE fill:#fef9c3,stroke:#d97706,color:#000
+    style ASK_LOW fill:#dcfce7,stroke:#15803d,color:#000,stroke-width:4px
+    style ASK_OVER fill:#dcfce7,stroke:#15803d,color:#000,stroke-width:4px
+    style CAPTURE_LOW fill:#fef9c3,stroke:#d97706,color:#000
+    style CAPTURE_OVER fill:#fef9c3,stroke:#d97706,color:#000
     style PREPROCESS fill:#fef9c3,stroke:#d97706,color:#000
-    style ASK fill:#dcfce7,stroke:#15803d,color:#000
-    style CAPTURE fill:#fef9c3,stroke:#d97706,color:#000
 ```
 
 ## 6. Prompt Templates
-1. **Intent Classification Prompt**
+The `(P#)` markers embedded in the diagrams map directly to these templates.
+1. **Intent Classification Prompt (P1)**
    - Purpose: have a tiny LLM categorize the user question into the canonical intents while keeping tokens minimal.
 ```text
 System: Classify the user question for routing. Choose exactly one intent and explain briefly.
@@ -156,7 +178,7 @@ User question: {{question}}
 Output JSON: {"intent": "enumeration|numeric_lookup|conceptual", "reason": "..."}
 ```
 
-2. **Route Selection Prompt**
+2. **Route Selection Prompt (P2)**
    - Purpose: let a lightweight LLM decide among structured / hybrid / long-text routes using the latest question, conversation summary, document inventory, and tool health.
    - Template:
 ```text
@@ -168,7 +190,7 @@ Annotation coverage: {{coverage_pct}}
 Respond with JSON: {"route": "...", "reason": "..."}
 ```
 
-3. **Clarification Prompt – No/Low Results**
+3. **Clarification Prompt – No/Low Results (P3)**
    - Triggered when auto-relaxation still yields zero or low-confidence evidence. Use it to explain that nothing matched and request more precise constraints.
 ```text
 System: Retrieval cannot proceed with the current scope (Reason: {{reason_summary}}). Summarize what was tried and ask for targeted clarification.
@@ -190,7 +212,7 @@ Attempts tried:
 Please ask the user for: alternate model names, acceptable width ranges in meters, or specific upload dates. Offer example follow-ups such as “search all documents” or “switch to text search” when appropriate.
 ```
 
-4. **Clarification Prompt – Result Overload**
+4. **Clarification Prompt – Result Overload (P4)**
    - Triggered when the hit count exceeds the prompt budget even after auto-relaxation. Ask the user to narrow scope or choose an export.
 ```text
 System: Retrieval produced too many matches to summarize (Reason: {{reason_summary}}). Summarize what was tried and ask for targeted filters.
@@ -213,7 +235,7 @@ Result summary: 1,042 candidate rows stored for export.
 Please ask the user for: date ranges, vendor names, or quantity thresholds. Offer example follow-ups such as “filter to 2024 only” or “export the full CSV”.
 ```
 
-5. **Answer Generation Prompt**
+5. **Answer Generation Prompt (P5)**
    - Consumes the compressed context bundle (structured rows + snippets) and enforces citations plus brevity for the small model.
 ```text
 System: You must answer only with the evidence provided below. Cite every statement as [source N]. If the context is insufficient, say so and list what is missing.
