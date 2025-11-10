@@ -58,7 +58,7 @@ This document outlines a generic agentic retrieval flow for a heterogeneous corp
 
 10. **Fallbacks, Clarifications & Logging**
     - Detect zero hits, low-confidence evidence, or overwhelming hit counts after each retrieval batch; auto-relax filters (categories, score cutoffs, time windows) before bothering the user.
-    - If results remain empty, or if the hit count still exceeds the prompt budget, ask the user for more details (synonyms, doc types, timeframes, filters) and then restart at preprocessing with the clarified input.
+    - If results remain empty, trigger the **No/Low Results** clarification prompt; if the hit count still exceeds the prompt budget, trigger the **Overload** clarification prompt so the user can narrow scope (filters, timeframes, entity lists) before another run, then restart at preprocessing with the clarified input.
     - Log every fallback path, clarification, overflow summary, and rerun so troubleshooting can trace the conversation.
 
 ## 3. High-Level Workflow Diagram
@@ -159,21 +159,20 @@ Conversation summary: {{summary<=350 tokens}}
 User question: {{question}}
 Detected intent: {{intent_label}}
 Annotation coverage: {{coverage_pct}}
-Tool health: {{status per tool}}
-Respond with JSON: {"route": "...", "fallbacks": ["...","..."], "reason": "..."}
+Respond with JSON: {"route": "...", "reason": "..."}
 ```
 
-2. **Clarification Prompt**
-   - Triggered when auto-relaxation still yields zero/low-confidence evidence or when the hit count exceeds the prompt budget. The prompt explains the situation so the user can refine scope (add terms, filters, priority ranges).
+2. **Clarification Prompt – No/Low Results**
+   - Triggered when auto-relaxation still yields zero or low-confidence evidence. Use it to explain that nothing matched and request more precise constraints.
 ```text
 System: Retrieval cannot proceed with the current scope (Reason: {{reason_summary}}). Summarize what was tried and ask for targeted clarification.
 User question: {{question}}
 Attempts tried:
 - {{attempt_1}} (matches: {{match_count_1}}, threshold: {{threshold_1}})
 - {{attempt_2}} ...
-Result summary: {{result_summary}} (e.g., 0 matches, or 1,024 matches > 200 limit)
-Please ask the user for: {{intent_specific_hints}} (e.g., alternate terms, product IDs, timeframe, acceptable ranges, filters).
-Offer example follow-ups such as “search all documents”, “filter by vendor ACME”, or “switch to text search” when appropriate.
+Result summary: {{result_summary}} (e.g., 0 matches, scores <0.2)
+Please ask the user for: {{intent_specific_hints}} (alternate terms, product IDs, timeframes, acceptable ranges).
+Offer example follow-ups such as “search all documents” or “switch to text search” when appropriate.
 ```
    - Example (numeric lookup intent, zero hits):
 ```text
@@ -184,18 +183,31 @@ Attempts tried:
 - summary vectors query="AlphaSolar width" (matches: 0, threshold: cosine>=0.4)
 Please ask the user for: alternate model names, acceptable width ranges in meters, or specific upload dates. Offer example follow-ups such as “search all documents” or “switch to text search” when appropriate.
 ```
+
+3. **Clarification Prompt – Result Overload**
+   - Triggered when the hit count exceeds the prompt budget even after auto-relaxation. Ask the user to narrow scope or choose an export.
+```text
+System: Retrieval produced too many matches to summarize (Reason: {{reason_summary}}). Summarize what was tried and ask for targeted filters.
+User question: {{question}}
+Attempts tried:
+- {{attempt_1}} (matches: {{match_count_1}}, limit: {{limit_1}})
+- {{attempt_2}} ...
+Result summary: {{result_summary}} (e.g., 1,024 matches stored for export)
+Please ask the user for: {{intent_specific_hints}} (filters such as vendor, date range, quantity thresholds, top-N requests).
+Offer example follow-ups such as “filter to 2024 only”, “show top 20 by amount”, or “export the full CSV”.
+```
    - Example (enumeration intent, overflow hits):
 ```text
-System: Retrieval cannot proceed with the current scope (Reason: 1,042 matching receipts > 50 snippet limit). Summarize what was tried and ask for targeted clarification.
+System: Retrieval produced too many matches to summarize (Reason: 1,042 matching receipts > 50 snippet limit). Summarize what was tried and ask for targeted filters.
 User question: “List every tire purchase receipt.”
 Attempts tried:
-- annotations_search properties.item_desc~"tire" date>=2023 (matches: 1,042, threshold: top 50)
-- search_text query="tire receipt" categories=short (matches: 987, threshold: top 40)
+- annotations_search properties.item_desc~"tire" date>=2023 (matches: 1,042, limit: 50)
+- search_text query="tire receipt" categories=short (matches: 987, limit: 40)
 Result summary: 1,042 candidate rows stored for export.
 Please ask the user for: date ranges, vendor names, or quantity thresholds. Offer example follow-ups such as “filter to 2024 only” or “export the full CSV”.
 ```
 
-3. **Answer Generation Prompt**
+4. **Answer Generation Prompt**
    - Consumes the compressed context bundle (structured rows + snippets) and enforces citations plus brevity for the small model.
 ```text
 System: You must answer only with the evidence provided below. Cite every statement as [source N]. If the context is insufficient, say so and list what is missing.
