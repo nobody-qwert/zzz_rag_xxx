@@ -27,6 +27,10 @@ class AppSettings:
     frontend_origin: str
     chunk_size: int
     chunk_overlap: int
+    large_chunk_size: int
+    large_chunk_left_overlap: int
+    large_chunk_right_overlap: int
+    large_chunk_parser_key: str
     llm_base_url: str
     llm_api_key: str
     llm_model: str
@@ -59,13 +63,18 @@ def load_settings() -> AppSettings:
     chat_completion_max_tokens = _int_env("CHAT_COMPLETION_MAX_TOKENS", "2048")
     chat_completion_reserve = _int_env("CHAT_COMPLETION_RESERVE", str(chat_completion_max_tokens))
 
+    ocr_parser_key = _str_env("OCR_PARSER_KEY", "mineru").lower()
+    large_chunk_size = _int_env("LARGE_CHUNK_SIZE", "1600")
+    large_chunk_left_overlap = _int_env("LARGE_CHUNK_LEFT_OVERLAP", "100")
+    large_chunk_right_overlap = _int_env("LARGE_CHUNK_RIGHT_OVERLAP", "100")
+
     return AppSettings(
         data_dir=data_dir,
         index_dir=index_dir,
         doc_store_path=doc_store_path,
         parser_mode=_str_env("PARSER_MODE", "ocr").lower(),
         min_pymupdf_chars_per_page=_int_env("MIN_PYMUPDF_CHARS_PER_PAGE", "300"),
-        ocr_parser_key=_str_env("OCR_PARSER_KEY", "mineru").lower(),
+        ocr_parser_key=ocr_parser_key,
         ocr_module_url=_str_env("OCR_MODULE_URL", "http://ocr-module:8000").rstrip("/"),
         ocr_module_timeout=_float_env("OCR_MODULE_TIMEOUT", "120"),
         chat_context_window=_int_env("CHAT_CONTEXT_WINDOW", "10000"),
@@ -84,8 +93,12 @@ def load_settings() -> AppSettings:
         ),
         completed_doc_statuses={s.strip().lower() for s in ("processed", "done", "completed", "ready")},
         frontend_origin=f"http://localhost:{os.environ.get('FRONTEND_PORT', '5173')}",
-        chunk_size=_int_env("CHUNK_SIZE", "500"),
-        chunk_overlap=_int_env("CHUNK_OVERLAP", "100"),
+        chunk_size=_int_env("CHUNK_SIZE", "200"),
+        chunk_overlap=_int_env("CHUNK_OVERLAP", "60"),
+        large_chunk_size=large_chunk_size,
+        large_chunk_left_overlap=large_chunk_left_overlap,
+        large_chunk_right_overlap=large_chunk_right_overlap,
+        large_chunk_parser_key=f"{ocr_parser_key}:large",
         llm_base_url=_str_env("LLM_BASE_URL"),
         llm_api_key=_str_env("LLM_API_KEY"),
         llm_model=_str_env("LLM_MODEL"),

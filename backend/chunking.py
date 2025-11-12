@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import md5
-from typing import Iterable, List, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence
 
 
 @dataclass
@@ -11,6 +11,21 @@ class Chunk:
     order_index: int
     text: str
     token_count: int
+
+
+@dataclass(frozen=True)
+class ChunkWindowSpec:
+    """Defines a sliding window with a fixed-sized core and optional padding."""
+
+    name: str
+    core_size: int
+    left_padding: int = 0
+    right_padding: int = 0
+    step_size: Optional[int] = None
+
+    def step(self) -> int:
+        base = self.step_size if self.step_size is not None else self.core_size
+        return max(1, base)
 
 
 def _tokenizer() -> any:
@@ -38,36 +53,70 @@ def _decode(enc, tokens: Sequence[int]) -> str:
     return enc.decode(list(tokens))
 
 
-def sliding_token_chunks(text: str, *, size: int = 500, overlap: int = 100) -> List[Chunk]:
-    enc = _tokenizer()
-    token_ids = _encode(enc, text)
-    if not token_ids:
+def _materialize_span(
+    enc,
+    token_ids: Sequence[int],
+    text: str,
+    start: int,
+    end: int,
+) -> str:
+    if enc is None:
+        approx_chars_per_token = 4
+        raw_start = min(len(text), start * approx_chars_per_token)
+        span_len = max(1, (end - start) * approx_chars_per_token)
+        raw_end = min(len(text), raw_start + span_len)
+        return text[raw_start:raw_end]
+    return _decode(enc, token_ids[start:end])
+
+
+def _chunks_for_spec(enc, token_ids: Sequence[int], text: str, spec: ChunkWindowSpec) -> List[Chunk]:
+    total_tokens = len(token_ids)
+    if total_tokens == 0 or spec.core_size <= 0:
         return []
 
-    step = max(1, size - max(0, overlap))
     out: List[Chunk] = []
-    order = 0
+    step = spec.step()
 
-    for start in range(0, len(token_ids), step):
-        end = min(len(token_ids), start + size)
-        if end <= start:
+    for core_start in range(0, total_tokens, step):
+        core_end = min(total_tokens, core_start + spec.core_size)
+        if core_end <= core_start:
             break
-        if enc is None:
-            # fallback: slice original text proportionally
-            span_len = max(1, (end - start) * 4)
-            piece = text[start * 4 : start * 4 + span_len]
-            content = piece
-        else:
-            content = _decode(enc, token_ids[start:end])
+
+        window_start = max(0, core_start - max(0, spec.left_padding))
+        window_end = min(total_tokens, core_end + max(0, spec.right_padding))
+        if window_end <= window_start:
+            continue
+
+        content = _materialize_span(enc, token_ids, text, window_start, window_end)
         content_norm = (content or "").strip()
         if not content_norm:
             continue
-        cid = "chunk-" + md5(content_norm.encode("utf-8")).hexdigest()
-        out.append(Chunk(chunk_id=cid, order_index=order, text=content_norm, token_count=end - start))
-        order += 1
 
-        if end == len(token_ids):
+        chunk_hash = md5(f"{spec.name}:{content_norm}".encode("utf-8")).hexdigest()
+        chunk_id = f"chunk-{spec.name}-{chunk_hash}"
+        out.append(
+            Chunk(
+                chunk_id=chunk_id,
+                order_index=len(out),
+                text=content_norm,
+                token_count=window_end - window_start,
+            )
+        )
+
+        if core_end == total_tokens:
             break
 
     return out
+
+
+def chunk_text_multi(text: str, specs: Sequence[ChunkWindowSpec]) -> Dict[str, List[Chunk]]:
+    """Return chunk lists for each spec using a shared tokenization."""
+    enc = _tokenizer()
+    token_ids = _encode(enc, text)
+    results: Dict[str, List[Chunk]] = {}
+
+    for spec in specs:
+        results[spec.name] = _chunks_for_spec(enc, token_ids, text, spec)
+
+    return results
 

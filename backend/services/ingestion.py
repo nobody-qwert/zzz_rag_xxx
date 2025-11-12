@@ -12,13 +12,13 @@ import httpx
 from fastapi import HTTPException, UploadFile
 
 try:
-    from ..chunking import sliding_token_chunks
+    from ..chunking import ChunkWindowSpec, chunk_text_multi
     from ..embeddings import EmbeddingClient
     from ..persistence import EmbeddingRow
     from ..dependencies import document_store, jobs_registry, settings
     from ..utils.files import safe_filename
 except ImportError:  # pragma: no cover
-    from chunking import sliding_token_chunks  # type: ignore
+    from chunking import ChunkWindowSpec, chunk_text_multi  # type: ignore
     from embeddings import EmbeddingClient  # type: ignore
     from persistence import EmbeddingRow  # type: ignore
     from dependencies import document_store, jobs_registry, settings  # type: ignore
@@ -215,9 +215,29 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
             )
 
         start_chunking = time.perf_counter()
-        chunks = sliding_token_chunks(chosen_text, size=settings.chunk_size, overlap=settings.chunk_overlap)
-        chunk_rows = [(c.chunk_id, c.order_index, c.text, c.token_count) for c in chunks]
-        await document_store.replace_chunks(doc_hash, settings.ocr_parser_key, chunk_rows)
+        chunk_specs = [
+            ChunkWindowSpec(
+                name="small",
+                core_size=settings.chunk_size,
+                left_padding=settings.chunk_overlap,
+                right_padding=settings.chunk_overlap,
+                step_size=settings.chunk_size,
+            ),
+            ChunkWindowSpec(
+                name="large",
+                core_size=settings.large_chunk_size,
+                left_padding=settings.large_chunk_left_overlap,
+                right_padding=settings.large_chunk_right_overlap,
+                step_size=settings.large_chunk_size,
+            ),
+        ]
+        chunk_views = chunk_text_multi(chosen_text, chunk_specs)
+        small_chunks = chunk_views.get("small", [])
+        large_chunks = chunk_views.get("large", [])
+        small_chunk_rows = [(c.chunk_id, c.order_index, c.text, c.token_count) for c in small_chunks]
+        large_chunk_rows = [(c.chunk_id, c.order_index, c.text, c.token_count) for c in large_chunks]
+        await document_store.replace_chunks(doc_hash, settings.ocr_parser_key, small_chunk_rows)
+        await document_store.replace_chunks(doc_hash, settings.large_chunk_parser_key, large_chunk_rows)
         chunking_time = time.perf_counter() - start_chunking
 
         start_embedding = time.perf_counter()
@@ -225,7 +245,7 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
         rows = await _compute_embeddings_for_chunks(
             [
                 {"chunk_id": cid, "order_index": idx, "text": txt, "token_count": tok}
-                for (cid, idx, txt, tok) in chunk_rows
+                for (cid, idx, txt, tok) in small_chunk_rows
             ],
             emb_client,
             doc_hash,

@@ -39,7 +39,7 @@ async def delete_document(doc_hash: str) -> Dict[str, Any]:
 
 @router.get("/parsers")
 async def list_parsers() -> Dict[str, Any]:
-    options = unique_ordered([settings.ocr_parser_key, "pymupdf"])
+    options = unique_ordered([settings.ocr_parser_key, settings.large_chunk_parser_key, "pymupdf"])
     return {"default": settings.ocr_parser_key, "options": options}
 
 
