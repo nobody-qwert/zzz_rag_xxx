@@ -25,17 +25,17 @@ const styles = {
   page: { display: "flex", flexWrap: "wrap", gap: 18, alignItems: "flex-start" },
   leftColumn: { display: "grid", gap: 18, flex: "2 1 520px", minWidth: 0 },
   libraryCard: { flex: "1 1 360px", minWidth: 0 },
-  card: { border: "1px solid rgba(148, 163, 184, 0.18)", borderRadius: 0, padding: "16px 18px", background: "rgba(13, 16, 24, 0.9)", boxShadow: "0 18px 32px rgba(2, 6, 23, 0.35)" },
+  card: { border: "none", borderRadius: 22, padding: "20px 22px", background: "rgba(13, 16, 24, 0.92)", boxShadow: "0 22px 44px rgba(2, 6, 23, 0.45)" },
   sectionHeader: { display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, marginBottom: 12 },
   sectionTitle: { margin: 0, fontSize: 18, fontWeight: 600, letterSpacing: 0.2 },
   badge: { padding: "4px 10px", borderRadius: 999, border: "1px solid rgba(148, 163, 184, 0.4)", fontSize: 12, color: "rgba(148, 163, 184, 0.85)", whiteSpace: "nowrap" },
   row: { display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" },
-  button: { font: "inherit", fontSize: 14, padding: "6px 12px", borderRadius: 0, border: "1px solid rgba(84, 105, 255, 0.45)", background: "linear-gradient(135deg, rgba(84, 105, 255, 0.18), rgba(84, 105, 255, 0.05))", color: "#c7d7ff", cursor: "pointer" },
-  subtleButton: { font: "inherit", fontSize: 13, padding: "4px 8px", borderRadius: 0, border: "1px solid rgba(148, 163, 184, 0.35)", background: "rgba(15, 17, 23, 0.6)", color: "rgba(226, 232, 240, 0.88)", cursor: "pointer" },
-  input: { font: "inherit", padding: "8px 12px", borderRadius: 0, border: "1px solid rgba(148, 163, 184, 0.35)", background: "rgba(9, 11, 18, 0.8)", color: "inherit", minWidth: 0 },
+  button: { font: "inherit", fontSize: 14, padding: "8px 18px", borderRadius: 999, border: "none", background: "linear-gradient(135deg, rgba(84, 105, 255, 0.35), rgba(84, 105, 255, 0.2))", color: "#c7d7ff", cursor: "pointer", boxShadow: "0 12px 24px rgba(2, 6, 23, 0.45)", transition: "transform 0.15s ease, box-shadow 0.15s ease" },
+  subtleButton: { font: "inherit", fontSize: 13, padding: "6px 14px", borderRadius: 999, border: "none", background: "rgba(29, 34, 49, 0.82)", color: "rgba(226, 232, 240, 0.88)", cursor: "pointer", boxShadow: "0 10px 18px rgba(2, 6, 23, 0.35)", transition: "transform 0.15s ease, box-shadow 0.15s ease" },
+  input: { font: "inherit", padding: "10px 16px", borderRadius: 999, border: "none", background: "rgba(9, 11, 18, 0.9)", color: "inherit", minWidth: 0, boxShadow: "0 0 0 1px rgba(148, 163, 184, 0.12), inset 0 2px 10px rgba(2, 6, 23, 0.65)", outline: "none" },
   feedback: { marginTop: 10, fontSize: 13, color: "rgba(148, 163, 184, 0.85)" },
-  docs: { maxHeight: "55vh", overflow: "auto", border: "1px solid rgba(148, 163, 184, 0.12)", borderRadius: 0, padding: 8, background: "rgba(9, 11, 18, 0.75)" },
-  listItem: { padding: "4px 8px 4px", borderRadius: 0, background: "rgba(23, 25, 35, 0.75)", border: "1px solid rgba(148, 163, 184, 0.08)", marginBottom: 8, display: "flex", flexDirection: "column", gap: 0 },
+  docs: { maxHeight: "55vh", overflow: "auto", border: "none", borderRadius: 20, padding: 12, background: "rgba(9, 11, 18, 0.78)", boxShadow: "inset 0 0 0 1px rgba(15, 23, 42, 0.25)" },
+  listItem: { padding: "8px 12px 8px", borderRadius: 16, background: "rgba(23, 25, 35, 0.78)", border: "none", marginBottom: 10, display: "flex", flexDirection: "column", gap: 2, boxShadow: "0 10px 20px rgba(2, 6, 23, 0.35)" },
   docTitleRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 },
   docTitleActions: { display: "flex", alignItems: "center", gap: 8, flexShrink: 0 },
   docName: { fontSize: 15, fontWeight: 600, color: "rgba(226, 232, 240, 0.95)", margin: 0, wordBreak: "break-word", lineHeight: 1.2 },
@@ -43,8 +43,8 @@ const styles = {
   docMetaRow: { display: "flex", flexWrap: "wrap", gap: 2, fontSize: 12, color: "rgba(148, 163, 184, 0.9)", marginTop: 0, lineHeight: 1.25 },
   docMetaItem: { whiteSpace: "nowrap" },
   docActions: { display: "flex", justifyContent: "flex-end", gap: 1, marginTop: 2 },
-  docPreviewButton: { font: "inherit", fontSize: 13, padding: "2px 10px", borderRadius: 999, border: "1px solid rgba(148, 163, 184, 0.35)", background: "rgba(84, 105, 255, 0.15)", color: "rgba(226, 232, 240, 0.98)", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" },
-  dangerIconButton: { font: "inherit", fontSize: 16, lineHeight: 1, width: 16, height: 16, borderRadius: 0, border: "1px solid rgba(239, 68, 68, 0.7)", background: "rgba(69, 10, 10, 0.65)", color: "rgba(248, 250, 252, 0.9)", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0 },
+  docPreviewButton: { font: "inherit", fontSize: 13, padding: "4px 14px", borderRadius: 999, border: "none", background: "linear-gradient(135deg, rgba(84, 105, 255, 0.28), rgba(84, 105, 255, 0.12))", color: "rgba(226, 232, 240, 0.98)", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", boxShadow: "0 10px 18px rgba(2, 6, 23, 0.35)" },
+  dangerIconButton: { font: "inherit", fontSize: 16, lineHeight: 1, width: 24, height: 24, borderRadius: 12, border: "none", background: "rgba(239, 68, 68, 0.18)", color: "rgba(248, 250, 252, 0.92)", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0, boxShadow: "0 8px 16px rgba(239, 68, 68, 0.25)" },
   docIngestRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1, marginTop: 1, fontSize: 12, color: "rgba(148, 163, 184, 0.85)" },
   docIngestInfo: { flex: 1, lineHeight: 1 },
   docPerfToggle: { font: "inherit", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 2, padding: 0, border: "none", background: "transparent", color: "rgba(148, 163, 184, 0.75)", cursor: "pointer" },
@@ -401,13 +401,14 @@ export default function IngestPage({ systemStatus = {} }) {
                   key={p.id} 
                   style={{ 
                     fontSize: 12, 
-                    padding: "6px 8px", 
+                    padding: "6px 10px", 
                     marginBottom: 4, 
-                    background: "rgba(23, 25, 35, 0.5)", 
-                    borderRadius: 0,
+                    background: "rgba(23, 25, 35, 0.55)", 
+                    borderRadius: 12,
                     display: "flex",
                     alignItems: "center",
-                    gap: 8
+                    gap: 8,
+                    boxShadow: "0 6px 14px rgba(2, 6, 23, 0.35)"
                   }}
                 >
                   <span>
@@ -443,7 +444,7 @@ export default function IngestPage({ systemStatus = {} }) {
           {selectedDoc ? (
             <>
               {/* Document Metadata Section */}
-              <div style={{ background: "rgba(23, 25, 35, 0.6)", border: "1px solid rgba(148, 163, 184, 0.12)", borderRadius: 0, padding: 14, marginBottom: 12 }}>
+              <div style={{ background: "rgba(23, 25, 35, 0.68)", border: "none", borderRadius: 20, padding: 16, marginBottom: 12, boxShadow: "0 18px 32px rgba(2, 6, 23, 0.4)" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
                   <span style={{ fontSize: 18 }}>📄</span>
                   <strong style={{ fontSize: 15, color: "#e2e8f0", flex: 1, minWidth: 0, wordBreak: "break-word" }}>
@@ -454,19 +455,19 @@ export default function IngestPage({ systemStatus = {} }) {
                 {/* Statistics Grid */}
                 {previewInfo && (
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))", gap: 10, marginBottom: 10 }}>
-                    <div style={{ textAlign: "center", padding: "6px 10px", background: "rgba(84, 105, 255, 0.08)", borderRadius: 0, border: "1px solid rgba(84, 105, 255, 0.2)" }}>
+                    <div style={{ textAlign: "center", padding: "10px 12px", background: "rgba(84, 105, 255, 0.15)", borderRadius: 16, border: "none", boxShadow: "0 10px 18px rgba(2, 6, 23, 0.35)" }}>
                       <div style={{ fontSize: 16, fontWeight: 600, color: "#c7d7ff" }}>{prettyBytes(previewInfo.file_size)}</div>
                       <div style={{ fontSize: 11, color: "rgba(148, 163, 184, 0.85)", marginTop: 2 }}>File Size</div>
                     </div>
-                    <div style={{ textAlign: "center", padding: "6px 10px", background: "rgba(84, 105, 255, 0.08)", borderRadius: 0, border: "1px solid rgba(84, 105, 255, 0.2)" }}>
+                    <div style={{ textAlign: "center", padding: "10px 12px", background: "rgba(84, 105, 255, 0.15)", borderRadius: 16, border: "none", boxShadow: "0 10px 18px rgba(2, 6, 23, 0.35)" }}>
                       <div style={{ fontSize: 16, fontWeight: 600, color: "#c7d7ff" }}>{(previewInfo.extracted_chars || 0).toLocaleString()}</div>
                       <div style={{ fontSize: 11, color: "rgba(148, 163, 184, 0.85)", marginTop: 2 }}>Characters</div>
                     </div>
-                    <div style={{ textAlign: "center", padding: "6px 10px", background: "rgba(84, 105, 255, 0.08)", borderRadius: 0, border: "1px solid rgba(84, 105, 255, 0.2)" }}>
+                    <div style={{ textAlign: "center", padding: "10px 12px", background: "rgba(84, 105, 255, 0.15)", borderRadius: 16, border: "none", boxShadow: "0 10px 18px rgba(2, 6, 23, 0.35)" }}>
                       <div style={{ fontSize: 16, fontWeight: 600, color: "#c7d7ff" }}>{(previewInfo.total_tokens || 0).toLocaleString()}</div>
                       <div style={{ fontSize: 11, color: "rgba(148, 163, 184, 0.85)", marginTop: 2 }}>Tokens</div>
                     </div>
-                    <div style={{ textAlign: "center", padding: "6px 10px", background: "rgba(84, 105, 255, 0.08)", borderRadius: 0, border: "1px solid rgba(84, 105, 255, 0.2)" }}>
+                    <div style={{ textAlign: "center", padding: "10px 12px", background: "rgba(84, 105, 255, 0.15)", borderRadius: 16, border: "none", boxShadow: "0 10px 18px rgba(2, 6, 23, 0.35)" }}>
                       <div style={{ fontSize: 16, fontWeight: 600, color: "#c7d7ff" }}>{previewInfo.chunk_count || 0}</div>
                       <div style={{ fontSize: 11, color: "rgba(148, 163, 184, 0.85)", marginTop: 2 }}>Embeddings</div>
                     </div>
@@ -491,7 +492,7 @@ export default function IngestPage({ systemStatus = {} }) {
               {/* Text Preview Section */}
               <div>
                 <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(148, 163, 184, 0.9)", marginBottom: 6 }}>Extracted Text</div>
-                <div style={{ border: "1px solid rgba(148,163,184,0.12)", borderRadius: 0, background: "rgba(9, 11, 18, 0.72)", padding: 10, maxHeight: "40vh", overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word", overflowWrap: "anywhere", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace", fontSize: 13, lineHeight: 1.5 }}>
+                <div style={{ border: "none", borderRadius: 18, background: "rgba(9, 11, 18, 0.78)", padding: 14, maxHeight: "40vh", overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word", overflowWrap: "anywhere", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace", fontSize: 13, lineHeight: 1.5, boxShadow: "inset 0 0 0 1px rgba(15, 23, 42, 0.35)" }}>
                   {preview || (previewLoading ? "Loading…" : "No text extracted.")}
                 </div>
                 {previewInfo && (

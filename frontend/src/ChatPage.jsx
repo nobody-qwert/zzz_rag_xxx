@@ -26,28 +26,28 @@ function mergeSources(existing = [], incoming = []) {
 
 const styles = {
   page: { display: "flex", flexWrap: "wrap", gap: 18, alignItems: "stretch", width: "100%", minHeight: "calc(100vh - 32px)" },
-  chatCard: { flex: "2 1 540px", border: "1px solid rgba(148, 163, 184, 0.18)", borderRadius: 0, padding: "16px 18px", background: "rgba(13, 16, 24, 0.92)", boxShadow: "0 16px 28px rgba(2, 6, 23, 0.32)", display: "flex", flexDirection: "column", gap: 12, minHeight: "100%" },
-  sideCard: { flex: "1 1 320px", border: "1px solid rgba(148, 163, 184, 0.18)", borderRadius: 0, padding: "16px 16px", background: "rgba(13, 16, 24, 0.88)", boxShadow: "0 12px 24px rgba(2, 6, 23, 0.3)", display: "grid", gridTemplateRows: "auto auto 1fr", gap: 10, alignContent: "stretch", minHeight: "100%" },
+  chatCard: { flex: "2 1 540px", border: "none", borderRadius: 22, padding: "18px 20px", background: "rgba(13, 16, 24, 0.92)", boxShadow: "0 20px 40px rgba(2, 6, 23, 0.45)", display: "flex", flexDirection: "column", gap: 12, minHeight: "100%" },
+  sideCard: { flex: "1 1 320px", border: "none", borderRadius: 22, padding: "18px 18px", background: "rgba(13, 16, 24, 0.9)", boxShadow: "0 18px 36px rgba(2, 6, 23, 0.4)", display: "grid", gridTemplateRows: "auto auto 1fr", gap: 10, alignContent: "stretch", minHeight: "100%" },
   sectionHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" },
   sectionTitle: { margin: 0, fontSize: 20, fontWeight: 600, letterSpacing: 0.25 },
   badge: { padding: "6px 12px", borderRadius: 999, border: "1px solid rgba(148, 163, 184, 0.35)", fontSize: 12, color: "rgba(148, 163, 184, 0.85)", whiteSpace: "nowrap" },
-  button: { font: "inherit", fontSize: 14, padding: "6px 12px", borderRadius: 0, border: "1px solid rgba(84, 105, 255, 0.45)", background: "linear-gradient(135deg, rgba(84, 105, 255, 0.18), rgba(84, 105, 255, 0.05))", color: "#c7d7ff", cursor: "pointer" },
-  subtleButton: { font: "inherit", fontSize: 13, padding: "4px 10px", borderRadius: 0, border: "1px solid rgba(148, 163, 184, 0.35)", background: "rgba(15, 17, 23, 0.6)", color: "rgba(226, 232, 240, 0.9)", cursor: "pointer" },
-  input: { font: "inherit", padding: "8px 12px", borderRadius: 0, border: "1px solid rgba(148, 163, 184, 0.35)", background: "rgba(9, 11, 18, 0.82)", color: "inherit", flex: 1, minWidth: 0 },
+  button: { font: "inherit", fontSize: 14, padding: "8px 18px", borderRadius: 999, border: "none", background: "linear-gradient(135deg, rgba(84, 105, 255, 0.35), rgba(84, 105, 255, 0.18))", color: "#c7d7ff", cursor: "pointer", boxShadow: "0 12px 24px rgba(2, 6, 23, 0.45)", transition: "transform 0.15s ease, box-shadow 0.15s ease" },
+  subtleButton: { font: "inherit", fontSize: 13, padding: "6px 14px", borderRadius: 999, border: "none", background: "rgba(29, 34, 49, 0.82)", color: "rgba(226, 232, 240, 0.9)", cursor: "pointer", boxShadow: "0 10px 18px rgba(2, 6, 23, 0.35)", transition: "transform 0.15s ease, box-shadow 0.15s ease" },
+  input: { font: "inherit", padding: "10px 18px", borderRadius: 999, border: "none", background: "rgba(9, 11, 18, 0.92)", color: "inherit", flex: 1, minWidth: 0, boxShadow: "0 0 0 1px rgba(148, 163, 184, 0.12), inset 0 2px 10px rgba(2, 6, 23, 0.65)", outline: "none" },
   muted: { fontSize: 13, color: "rgba(148, 163, 184, 0.78)" },
-  messages: { flex: 1, minHeight: 240, minWidth: 0, overflow: "auto", border: "1px solid rgba(148, 163, 184, 0.12)", borderRadius: 0, padding: 12, background: "rgba(9, 11, 18, 0.78)", whiteSpace: "pre-wrap", display: "flex", flexDirection: "column", gap: 8 },
+  messages: { flex: 1, minHeight: 240, minWidth: 0, overflow: "auto", border: "none", borderRadius: 20, padding: 16, background: "rgba(9, 11, 18, 0.82)", whiteSpace: "pre-wrap", display: "flex", flexDirection: "column", gap: 8, boxShadow: "inset 0 0 0 1px rgba(15, 23, 42, 0.3)" },
   messageList: { display: "flex", flexDirection: "column", gap: 8 },
-  userBubble: { alignSelf: "flex-end", background: "rgba(59, 130, 246, 0.18)", borderRadius: 0, padding: 10, maxWidth: "85%" },
-  assistantBubble: { alignSelf: "flex-start", background: "rgba(84, 105, 255, 0.12)", borderRadius: 0, padding: 10, maxWidth: "95%", lineHeight: 1.5 },
-  errorBubble: { alignSelf: "flex-start", background: "rgba(239, 68, 68, 0.12)", border: "1px solid rgba(239, 68, 68, 0.4)", borderRadius: 0, padding: 10, maxWidth: "95%" },
+  userBubble: { alignSelf: "flex-end", background: "rgba(59, 130, 246, 0.2)", borderRadius: 18, padding: 12, maxWidth: "85%", boxShadow: "0 8px 20px rgba(2, 6, 23, 0.4)" },
+  assistantBubble: { alignSelf: "flex-start", background: "rgba(84, 105, 255, 0.15)", borderRadius: 18, padding: 12, maxWidth: "95%", lineHeight: 1.5, boxShadow: "0 8px 20px rgba(2, 6, 23, 0.35)" },
+  errorBubble: { alignSelf: "flex-start", background: "rgba(239, 68, 68, 0.18)", borderRadius: 18, padding: 12, maxWidth: "95%", boxShadow: "0 8px 20px rgba(239, 68, 68, 0.25)" },
   messageRole: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.8, color: "rgba(148, 163, 184, 0.75)", marginBottom: 4 },
   sourcesBlock: { fontSize: 12, color: "rgba(148, 163, 184, 0.78)", marginTop: 10 },
   sourceItem: { marginBottom: 6, paddingBottom: 6, borderBottom: "1px solid rgba(148, 163, 184, 0.08)" },
   sourceHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" },
-  sourceToggle: { font: "inherit", fontSize: 11, padding: "4px 10px", borderRadius: 999, border: "1px solid rgba(148, 163, 184, 0.35)", background: "rgba(15, 17, 23, 0.6)", color: "rgba(226, 232, 240, 0.85)", cursor: "pointer" },
+  sourceToggle: { font: "inherit", fontSize: 11, padding: "4px 12px", borderRadius: 999, border: "none", background: "rgba(15, 17, 23, 0.72)", color: "rgba(226, 232, 240, 0.9)", cursor: "pointer", boxShadow: "0 6px 14px rgba(2, 6, 23, 0.35)" },
   sourcePreview: { fontSize: 11, color: "rgba(148, 163, 184, 0.6)", fontStyle: "italic", marginTop: 4 },
-  docs: { overflow: "auto", border: "1px solid rgba(148, 163, 184, 0.12)", borderRadius: 0, padding: 12, background: "rgba(9, 11, 18, 0.72)" },
-  listItem: { padding: "10px 8px", borderRadius: 0, marginBottom: 6, background: "rgba(23, 25, 35, 0.7)" },
+  docs: { overflow: "auto", border: "none", borderRadius: 20, padding: 14, background: "rgba(9, 11, 18, 0.78)", boxShadow: "inset 0 0 0 1px rgba(15, 23, 42, 0.25)" },
+  listItem: { padding: "10px 8px", borderRadius: 14, marginBottom: 6, background: "rgba(23, 25, 35, 0.7)" },
   contextBadge: { padding: "8px 14px", borderRadius: 14, border: "1px solid rgba(148, 163, 184, 0.35)", fontSize: 12, color: "rgba(148, 163, 184, 0.85)", background: "rgba(12, 14, 22, 0.85)" },
   contextLabel: { fontSize: 12, color: "rgba(148, 163, 184, 0.8)" },
   kbd: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace' },
@@ -231,7 +231,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
         </div>
 
         {warmingUp && !llmReady && (
-          <div style={{ ...styles.muted, background: "rgba(250, 204, 21, 0.12)", border: "1px solid rgba(250, 204, 21, 0.24)", padding: 12, borderRadius: 0 }}>
+          <div style={{ ...styles.muted, background: "rgba(250, 204, 21, 0.12)", padding: 12, borderRadius: 16, boxShadow: "0 10px 20px rgba(251, 191, 36, 0.25)" }}>
             🔥 Warming up the local LLM... Please wait.
           </div>
         )}
@@ -305,7 +305,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
         </div>
 
         {pendingFollowUp && (
-          <div style={{ border: "1px solid rgba(248, 250, 252, 0.12)", borderRadius: 0, padding: 12, background: "rgba(24, 27, 40, 0.7)", display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ border: "none", borderRadius: 18, padding: 12, background: "rgba(24, 27, 40, 0.8)", display: "flex", flexDirection: "column", gap: 10, boxShadow: "0 16px 32px rgba(2, 6, 23, 0.4)" }}>
             <div style={{ ...styles.muted, fontSize: 13 }}>
               The assistant stopped early (finish reason: {messages.find((m) => m.id === pendingFollowUp.messageId)?.finishReason || "unknown"}).
               Choose <strong>Continue</strong> to keep generating or <strong>Abort</strong> to accept the current response.
