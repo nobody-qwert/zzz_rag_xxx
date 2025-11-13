@@ -6,7 +6,7 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import httpx
 from fastapi import HTTPException, UploadFile
@@ -127,7 +127,12 @@ async def _queue_job(source_path: Path, doc_hash: str, display_name: str) -> str
     from uuid import uuid4
 
     job_id = str(uuid4())
-    jobs_registry[job_id] = {"status": "queued", "file": display_name, "hash": doc_hash}
+    jobs_registry[job_id] = {
+        "status": "queued",
+        "file": display_name,
+        "hash": doc_hash,
+        "progress": {"stage": "queued", "percent": 0.0},
+    }
     await document_store.create_job(job_id, doc_hash)
     asyncio.create_task(_process_job(job_id, source_path, doc_hash, display_name))
     return job_id
@@ -138,6 +143,16 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
         jobs_registry[job_id]["status"] = status if not error else f"error: {error}"
         await document_store.update_document_status(doc_hash, status if not error else "error", error=error)
 
+    def set_progress(stage: str, percent: float, **extra: Any) -> None:
+        payload = {
+            "stage": stage,
+            "percent": max(0.0, min(100.0, float(percent))),
+        }
+        for key, value in extra.items():
+            if value is not None:
+                payload[key] = value
+        jobs_registry[job_id]["progress"] = payload
+
     start_total = time.perf_counter()
     pymupdf_time = None
     mineru_time = None
@@ -147,10 +162,12 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
     try:
         await document_store.mark_job_started(job_id)
         await document_store.update_document_status(doc_hash, "processing")
+        set_progress("preparing", 5.0)
 
         start_pymupdf = time.perf_counter()
         py_out = await _extract_pymupdf(doc_path)
         pymupdf_time = time.perf_counter() - start_pymupdf
+        set_progress("extract:pymupdf", 15.0)
         await document_store.upsert_extraction(
             doc_hash,
             "pymupdf",
@@ -170,9 +187,25 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
 
         if run_ocr:
             start_mineru = time.perf_counter()
+            set_progress("ocr:queued", 25.0)
+
+            def ocr_progress_callback(data: Dict[str, Any]) -> None:
+                if not data:
+                    return
+                stage = str(data.get("stage") or "ocr")
+                percent = data.get("percent")
+                current = data.get("current")
+                total = data.get("total")
+                try:
+                    percent_val = float(percent) if percent is not None else jobs_registry.get(job_id, {}).get("progress", {}).get("percent", 30.0)
+                except (TypeError, ValueError):
+                    percent_val = jobs_registry.get(job_id, {}).get("progress", {}).get("percent", 30.0)
+                set_progress(f"ocr:{stage}", min(90.0, percent_val), current=current, total=total)
+
             try:
-                ocr_result = await _call_ocr_module(doc_hash, doc_path)
+                ocr_result = await _call_ocr_module(doc_hash, doc_path, progress_cb=ocr_progress_callback)
                 mineru_time = time.perf_counter() - start_mineru
+                set_progress("ocr:completed", 70.0)
                 ocr_text = ocr_result.get("text") or ""
                 ocr_meta = ocr_result.get("metadata") or {}
                 await document_store.upsert_extraction(
@@ -249,6 +282,7 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
         await document_store.replace_chunks(doc_hash, settings.ocr_parser_key, small_chunk_rows)
         await document_store.replace_chunks(doc_hash, settings.large_chunk_parser_key, large_chunk_rows)
         chunking_time = time.perf_counter() - start_chunking
+        set_progress("chunking", 85.0)
 
         start_embedding = time.perf_counter()
         emb_client = EmbeddingClient()
@@ -262,6 +296,7 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
         )
         await document_store.replace_embeddings(rows)
         embedding_time = time.perf_counter() - start_embedding
+        set_progress("embedding", 95.0)
 
         total_time = time.perf_counter() - start_total
         try:
@@ -279,6 +314,7 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
         await document_store.mark_document_processed(doc_hash)
         await document_store.finish_job(job_id, "done")
         jobs_registry[job_id]["status"] = "done"
+        set_progress("completed", 100.0)
     except asyncio.CancelledError:
         await document_store.finish_job(job_id, "cancelled", error="cancelled")
         await update("error", error="cancelled")
@@ -286,6 +322,8 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
     except Exception as exc:  # pragma: no cover - background task logging
         await document_store.finish_job(job_id, "error", error=str(exc))
         await update("error", error=str(exc))
+        current_percent = jobs_registry.get(job_id, {}).get("progress", {}).get("percent", 0.0)
+        set_progress("error", current_percent, message=str(exc))
         logger.exception("Job %s failed: %s", job_id, exc)
 
 
@@ -321,7 +359,12 @@ def _is_pdf_file(path: Path) -> bool:
     return path.suffix.lower() == ".pdf"
 
 
-async def _call_ocr_module(doc_hash: str, doc_path: Path) -> Dict[str, Any]:
+async def _call_ocr_module(
+    doc_hash: str,
+    doc_path: Path,
+    *,
+    progress_cb: Optional[Callable[[Dict[str, Any]], None]] = None,
+) -> Dict[str, Any]:
     if not doc_path.exists():
         raise RuntimeError(f"OCR source file missing: {doc_path}")
 
@@ -360,6 +403,10 @@ async def _call_ocr_module(doc_hash: str, doc_path: Path) -> Dict[str, Any]:
                 status_resp = await client.get(status_url)
                 status_resp.raise_for_status()
                 status_data = status_resp.json()
+                if progress_cb:
+                    progress_payload = status_data.get("progress")
+                    if isinstance(progress_payload, dict):
+                        progress_cb(progress_payload)
             except httpx.TransportError as exc:
                 logger.warning("OCR status poll for job %s failed: %s — retrying", job_id, exc)
                 await asyncio.sleep(retry_delay)
@@ -375,7 +422,10 @@ async def _call_ocr_module(doc_hash: str, doc_path: Path) -> Dict[str, Any]:
                 try:
                     result_resp = await client.get(result_url)
                     result_resp.raise_for_status()
-                    return result_resp.json()
+                    result_data = result_resp.json()
+                    if progress_cb:
+                        progress_cb({"stage": "completed", "percent": 100.0})
+                    return result_data
                 except httpx.TransportError as exc:
                     logger.warning("OCR result fetch for job %s failed: %s — retrying", job_id, exc)
                     await asyncio.sleep(retry_delay)

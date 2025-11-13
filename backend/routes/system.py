@@ -38,6 +38,7 @@ async def system_status() -> dict:
                 "doc_hash": info.get("hash"),
                 "status": info.get("status"),
                 "file": info.get("file"),
+                "progress": info.get("progress"),
             }
             for jid, info in jobs_registry.items()
             if info.get("status") in {"queued", "running"}
@@ -51,6 +52,7 @@ async def system_status() -> dict:
                 "doc_hash": info.get("hash"),
                 "status": info.get("status"),
                 "file": info.get("file"),
+                "progress": info.get("progress"),
             }
             for jid, info in jobs_registry.items()
         ],

@@ -52,6 +52,13 @@ const styles = {
   docPerfDetails: { marginTop: 1, marginLeft: 12, fontSize: 11, color: "rgba(148, 163, 184, 0.85)", lineHeight: 1.35 },
   muted: { opacity: 0.75, fontSize: 13, color: "rgba(148, 163, 184, 0.8)" },
   error: { fontSize: 13, color: "#ff8f8f", marginTop: 6 },
+  progressTrack: { position: "relative", height: 8, background: "rgba(255, 255, 255, 0.12)", borderRadius: 999, overflow: "hidden" },
+  progressFill: { position: "absolute", top: 0, bottom: 0, left: 0, background: "linear-gradient(90deg, rgba(167,139,250,0.9), rgba(59,130,246,0.9))", borderRadius: 999, transition: "width 0.4s ease" },
+  progressLabel: { marginTop: 6, fontSize: 11, letterSpacing: 0.4, color: "rgba(226, 232, 240, 0.8)", textTransform: "uppercase" },
+  miniProgress: { flex: 1, display: "flex", alignItems: "center", gap: 6, minWidth: 140 },
+  miniProgressTrack: { flex: 1, height: 6, borderRadius: 999, background: "rgba(255, 255, 255, 0.12)", overflow: "hidden" },
+  miniProgressFill: { height: "100%", background: "linear-gradient(90deg, rgba(167,139,250,0.95), rgba(59,130,246,0.85))", transition: "width 0.4s ease" },
+  miniProgressLabel: { fontSize: 11, color: "rgba(226, 232, 240, 0.8)", minWidth: 46, textAlign: "right" },
 };
 
 const FALLBACK_PARSER = "mineru";
@@ -155,6 +162,17 @@ export default function IngestPage({ systemStatus = {} }) {
 
   const systemDocs = useMemo(() => (Array.isArray(systemStatus.documents) ? systemStatus.documents : []), [systemStatus.documents]);
   const displayDocs = docs.length ? docs : systemDocs;
+  const jobInfoByHash = useMemo(() => {
+    const map = new Map();
+    if (Array.isArray(systemStatus.jobs)) {
+      systemStatus.jobs.forEach((job) => {
+        if (job && job.doc_hash) {
+          map.set(job.doc_hash, job);
+        }
+      });
+    }
+    return map;
+  }, [systemStatus.jobs]);
 
   const handleUploadAll = async () => {
     if (files.length === 0) { setUploadStatus("Select files first."); return; }
@@ -169,6 +187,8 @@ export default function IngestPage({ systemStatus = {} }) {
       status: "pending",
       jobId: null,
       error: null,
+      jobProgress: null,
+      jobHash: null,
     }));
     setUploadProgress(progress);
     
@@ -201,7 +221,7 @@ export default function IngestPage({ systemStatus = {} }) {
           ));
         } else if (data.job_id) {
           setUploadProgress(prev => prev.map((p, i) => 
-            i === idx ? { ...p, status: "queued", jobId: data.job_id } : p
+            i === idx ? { ...p, status: "queued", jobId: data.job_id, jobHash: data.hash || p.jobHash } : p
           ));
           setActiveJobs(prev => new Set([...prev, data.job_id]));
         }
@@ -338,12 +358,35 @@ export default function IngestPage({ systemStatus = {} }) {
             const data = await readJsonSafe(res);
             if (res.ok && data.status) {
               const st = String(data.status).toLowerCase();
-              return { jobId, status: st };
+              return { jobId, status: st, payload: data };
             }
           } catch {}
-          return { jobId, status: null };
+          return { jobId, status: null, payload: null };
         })
       );
+      
+      const progressMap = new Map();
+      results.forEach((r) => {
+        if (r && r.jobId && r.payload) {
+          progressMap.set(r.jobId, r);
+        }
+      });
+      if (progressMap.size > 0) {
+        setUploadProgress(prev =>
+          prev.map((entry) => {
+            if (!entry.jobId || !progressMap.has(entry.jobId)) return entry;
+            const info = progressMap.get(entry.jobId);
+            const nextProgress = info.payload?.progress || entry.jobProgress;
+            const nextHash = info.payload?.doc_hash || info.payload?.hash || entry.jobHash;
+            return {
+              ...entry,
+              status: info.status || entry.status,
+              jobProgress: nextProgress || entry.jobProgress,
+              jobHash: nextHash || entry.jobHash,
+            };
+          })
+        );
+      }
       
       // Remove completed jobs
       const completedJobs = results.filter(r => r.status === "done" || r.status?.startsWith("error"));
@@ -421,9 +464,21 @@ export default function IngestPage({ systemStatus = {} }) {
                   <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {p.name}
                   </span>
-                  <span style={{ fontSize: 11, color: "rgba(148, 163, 184, 0.7)" }}>
-                    {p.status === "queued" && p.jobId ? `job ${shortHash(p.jobId)}` : p.status}
-                  </span>
+                  <div style={styles.miniProgress}>
+                    <div style={styles.miniProgressTrack}>
+                      <div
+                        style={{
+                          ...styles.miniProgressFill,
+                          width: `${Math.min(100, Math.max(0, p.jobProgress?.percent ?? (p.status === "queued" ? 5 : 0)))}%`,
+                        }}
+                      />
+                    </div>
+                    <span style={styles.miniProgressLabel}>
+                      {p.jobProgress?.percent != null
+                        ? `${Math.round(p.jobProgress.percent)}%`
+                        : p.status}
+                    </span>
+                  </div>
                   {p.error && (
                     <span style={{ fontSize: 11, color: "#ff8f8f" }} title={p.error}>
                       {p.error.length > 20 ? p.error.substring(0, 20) + "..." : p.error}
@@ -560,6 +615,9 @@ export default function IngestPage({ systemStatus = {} }) {
                 const showRetry = isErrored && Boolean(d.hash);
                 const showPerf = hasPerf && isCompleted;
                 const isDeleting = deletingHash === d.hash;
+                const jobInfo = d.hash ? jobInfoByHash.get(d.hash) : null;
+                const jobProgress = jobInfo?.progress;
+                const showDocProgress = isInProgress && jobProgress && typeof jobProgress.percent === "number";
                 
                 return (
                   <li key={d.hash || d.stored_name || d.name} style={styles.listItem}>
@@ -657,6 +715,21 @@ export default function IngestPage({ systemStatus = {} }) {
                           </div>
                         )}
                       </>
+                    )}
+                    {showDocProgress && (
+                      <div style={{ marginTop: 8 }}>
+                        <div style={styles.progressTrack} aria-label="Document progress">
+                          <div
+                            style={{
+                              ...styles.progressFill,
+                              width: `${Math.max(5, Math.min(100, jobProgress.percent))}%`,
+                            }}
+                          />
+                        </div>
+                        <div style={styles.progressLabel}>
+                          {`${Math.round(jobProgress.percent)}% · ${(jobProgress.stage || "processing").replace(/[:_]/g, " ")}`}
+                        </div>
+                      </div>
                     )}
                     {d.error && (<div style={styles.error}>Error: {d.error}</div>)}
 

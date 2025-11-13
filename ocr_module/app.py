@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -65,6 +66,24 @@ class OCRJob:
     error: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
     text: Optional[str] = None
+    progress: Dict[str, Any] = field(default_factory=lambda: {"stage": "queued", "percent": 0.0})
+
+    def set_status(self, status: str, *, error: Optional[str] = None) -> None:
+        self.status = status
+        if error is not None:
+            self.error = error
+        self.updated_at = _utc_now()
+
+    def update_progress(self, stage: str, percent: float, **extra: Any) -> None:
+        payload = {
+            "stage": stage,
+            "percent": max(0.0, min(100.0, float(percent))),
+        }
+        for key, value in extra.items():
+            if value is not None:
+                payload[key] = value
+        self.progress = payload
+        self.updated_at = _utc_now()
 
     def as_status_payload(self) -> Dict[str, Any]:
         return {
@@ -77,10 +96,33 @@ class OCRJob:
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "error": self.error,
+            "progress": self.progress,
         }
 
 
 jobs: Dict[str, OCRJob] = {}
+
+
+async def _progress_pump(
+    job: OCRJob,
+    task: asyncio.Task,
+    *,
+    stage: str,
+    start: float = 10.0,
+    end: float = 90.0,
+    interval: float = 5.0,
+) -> None:
+    percent = start
+    job.update_progress(stage, percent)
+    try:
+        while not task.done():
+            await asyncio.sleep(interval)
+            if task.done():
+                break
+            percent = min(end, percent + max(1.0, (end - start) * 0.05))
+            job.update_progress(stage, percent)
+    except asyncio.CancelledError:  # pragma: no cover - cooperative cancellation
+        pass
 
 
 class ParseResponse(BaseModel):
@@ -103,6 +145,7 @@ class JobStatusResponse(BaseModel):
     started_at: Optional[str] = None
     finished_at: Optional[str] = None
     error: Optional[str] = None
+    progress: Optional[Dict[str, Any]] = None
 
 
 @asynccontextmanager
@@ -193,6 +236,7 @@ async def parse_document(
         formula_enable=selected_formula,
         pdf_path=pdf_path,
     )
+    job.update_progress("queued", 0.0)
     jobs[job_id] = job
     asyncio.create_task(_process_job(job, out_dir))
     return JobQueuedResponse(job_id=job.job_id, status=job.status)
@@ -200,26 +244,39 @@ async def parse_document(
 
 async def _process_job(job: OCRJob, out_dir: Path) -> None:
     try:
-        job.status = "running"
+        job.set_status("running")
         job.started_at = _utc_now()
-        job.updated_at = job.started_at
-        result = await asyncio.to_thread(
-            run_mineru,
-            job.pdf_path,
-            out_dir,
-            parse_method=job.parse_method,
-            lang=job.lang,
-            table_enable=job.table_enable,
-            formula_enable=job.formula_enable,
+        job.update_progress("initializing", 5.0)
+        parse_task = asyncio.create_task(
+            asyncio.to_thread(
+                run_mineru,
+                job.pdf_path,
+                out_dir,
+                parse_method=job.parse_method,
+                lang=job.lang,
+                table_enable=job.table_enable,
+                formula_enable=job.formula_enable,
+            )
         )
+        pump_task = asyncio.create_task(_progress_pump(job, parse_task, stage="parsing", start=10.0, end=90.0))
+        try:
+            result = await parse_task
+        finally:
+            pump_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await pump_task
+
         job.text = result.text
         job.metadata = result.metadata
-        job.status = "done"
+        job.update_progress("finalizing", 95.0)
         job.finished_at = _utc_now()
+        job.set_status("done")
+        job.update_progress("completed", 100.0)
     except Exception as exc:
         job.error = str(exc)
-        job.status = "error"
+        job.set_status("error", error=str(exc))
         job.finished_at = _utc_now()
+        job.update_progress("error", job.progress.get("percent", 0.0), message=str(exc))
         logger.exception("MinerU parse failed for %s (job %s)", job.pdf_path, job.job_id)
     finally:
         job.updated_at = _utc_now()
