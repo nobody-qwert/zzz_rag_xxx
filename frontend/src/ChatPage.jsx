@@ -29,27 +29,27 @@ const styles = {
   chatCard: { flex: "2 1 540px", border: "none", borderRadius: 24, padding: "22px 24px", background: "linear-gradient(145deg, rgba(63, 76, 149, 0.98), rgba(22, 26, 55, 0.95))", boxShadow: "0 36px 72px rgba(5, 8, 25, 0.78)", display: "flex", flexDirection: "column", gap: 16, minHeight: "100%" },
   sideCard: { flex: "1 1 320px", border: "none", borderRadius: 24, padding: "22px 22px", background: "linear-gradient(160deg, rgba(55, 68, 138, 0.97), rgba(18, 22, 48, 0.94))", boxShadow: "0 32px 64px rgba(5, 8, 25, 0.72)", display: "grid", gridTemplateRows: "auto auto 1fr", gap: 16, alignContent: "stretch", minHeight: "100%" },
   sectionHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" },
-  sectionTitle: { margin: 0, fontSize: 20, fontWeight: 600, letterSpacing: 0.25 },
-  badge: { padding: "6px 12px", borderRadius: 999, border: "1px solid rgba(148, 163, 184, 0.35)", fontSize: 12, color: "rgba(148, 163, 184, 0.85)", whiteSpace: "nowrap" },
-  button: { font: "inherit", fontSize: 14, padding: "10px 22px", borderRadius: 999, border: "none", background: "linear-gradient(135deg, rgba(139, 92, 246, 0.92), rgba(59, 130, 246, 0.78))", color: "#f8f9ff", cursor: "pointer", boxShadow: "0 20px 40px rgba(8, 12, 32, 0.65)", transition: "transform 0.15s ease, box-shadow 0.15s ease" },
-  subtleButton: { font: "inherit", fontSize: 13, padding: "8px 18px", borderRadius: 999, border: "none", background: "rgba(66, 77, 124, 0.96)", color: "rgba(248, 250, 255, 0.96)", cursor: "pointer", boxShadow: "0 16px 30px rgba(6, 9, 25, 0.65)", transition: "transform 0.15s ease, box-shadow 0.15s ease" },
-  input: { font: "inherit", padding: "12px 22px", borderRadius: 999, border: "none", background: "rgba(21, 26, 54, 0.98)", color: "inherit", flex: 1, minWidth: 0, boxShadow: "0 0 0 2px rgba(59, 130, 246, 0.3), inset 0 2px 14px rgba(3, 6, 18, 0.7)", outline: "none" },
-  muted: { fontSize: 13, color: "rgba(148, 163, 184, 0.78)" },
+  sectionTitle: { margin: 0, fontSize: 20, fontWeight: 600, letterSpacing: 0.25, color: "#ffffff" },
+  badge: { padding: "6px 12px", borderRadius: 999, border: "1px solid rgba(255, 255, 255, 0.6)", fontSize: 12, color: "#ffffff", whiteSpace: "nowrap" },
+  button: { font: "inherit", fontSize: 14, padding: "10px 22px", borderRadius: 999, border: "none", background: "linear-gradient(135deg, rgba(139, 92, 246, 0.92), rgba(59, 130, 246, 0.78))", color: "#ffffff", cursor: "pointer", boxShadow: "0 20px 40px rgba(8, 12, 32, 0.65)", transition: "transform 0.15s ease, box-shadow 0.15s ease" },
+  subtleButton: { font: "inherit", fontSize: 13, padding: "8px 18px", borderRadius: 999, border: "none", background: "rgba(66, 77, 124, 0.96)", color: "#fdfdff", cursor: "pointer", boxShadow: "0 16px 30px rgba(6, 9, 25, 0.65)", transition: "transform 0.15s ease, box-shadow 0.15s ease" },
+  input: { font: "inherit", padding: "12px 22px", borderRadius: 999, border: "none", background: "rgba(21, 26, 54, 0.98)", color: "#ffffff", flex: 1, minWidth: 0, boxShadow: "0 0 0 2px rgba(59, 130, 246, 0.3), inset 0 2px 14px rgba(3, 6, 18, 0.7)", outline: "none" },
+  muted: { fontSize: 13, color: "#f8fbff" },
   messages: { flex: 1, minHeight: 240, minWidth: 0, overflow: "auto", border: "none", borderRadius: 24, padding: 20, background: "rgba(22, 27, 58, 0.98)", whiteSpace: "pre-wrap", display: "flex", flexDirection: "column", gap: 12, boxShadow: "0 22px 48px rgba(3, 5, 15, 0.75), inset 0 0 0 2px rgba(99, 102, 241, 0.14)" },
   messageList: { display: "flex", flexDirection: "column", gap: 8 },
-  userBubble: { alignSelf: "flex-end", background: "rgba(96, 165, 250, 0.38)", borderRadius: 22, padding: 15, maxWidth: "85%", boxShadow: "0 18px 34px rgba(5, 8, 24, 0.7)" },
-  assistantBubble: { alignSelf: "flex-start", background: "rgba(165, 180, 252, 0.32)", borderRadius: 22, padding: 15, maxWidth: "95%", lineHeight: 1.65, boxShadow: "0 18px 34px rgba(5, 8, 24, 0.65)" },
+  userBubble: { alignSelf: "flex-end", background: "rgba(96, 165, 250, 0.38)", borderRadius: 22, padding: 15, maxWidth: "85%", boxShadow: "0 18px 34px rgba(5, 8, 24, 0.7)", color: "#fbfcff" },
+  assistantBubble: { alignSelf: "flex-start", background: "rgba(165, 180, 252, 0.32)", borderRadius: 22, padding: 15, maxWidth: "95%", lineHeight: 1.65, boxShadow: "0 18px 34px rgba(5, 8, 24, 0.65)", color: "#fbfcff" },
   errorBubble: { alignSelf: "flex-start", background: "rgba(252, 165, 165, 0.32)", borderRadius: 22, padding: 15, maxWidth: "95%", boxShadow: "0 16px 28px rgba(239, 68, 68, 0.35)" },
-  messageRole: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.8, color: "rgba(148, 163, 184, 0.75)", marginBottom: 4 },
-  sourcesBlock: { fontSize: 12, color: "rgba(148, 163, 184, 0.78)", marginTop: 10 },
+  messageRole: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.8, color: "#ffffff", marginBottom: 4 },
+  sourcesBlock: { fontSize: 12, color: "#ffffff", marginTop: 10 },
   sourceItem: { marginBottom: 6, paddingBottom: 6, borderBottom: "1px solid rgba(148, 163, 184, 0.08)" },
   sourceHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" },
-  sourceToggle: { font: "inherit", fontSize: 11, padding: "6px 16px", borderRadius: 999, border: "none", background: "rgba(65, 77, 128, 0.96)", color: "rgba(233, 238, 255, 0.96)", cursor: "pointer", boxShadow: "0 14px 24px rgba(3, 6, 18, 0.55)" },
-  sourcePreview: { fontSize: 11, color: "rgba(148, 163, 184, 0.6)", fontStyle: "italic", marginTop: 4 },
-  docs: { overflow: "auto", border: "none", borderRadius: 24, padding: 18, background: "rgba(19, 24, 54, 0.97)", boxShadow: "0 20px 40px rgba(0, 0, 0, 0.58), inset 0 0 0 2px rgba(99, 102, 241, 0.1)" },
-  listItem: { padding: "14px 12px", borderRadius: 18, marginBottom: 12, background: "rgba(47, 58, 118, 0.95)", boxShadow: "0 14px 26px rgba(2, 6, 19, 0.62)" },
-  contextBadge: { padding: "8px 14px", borderRadius: 14, border: "1px solid rgba(148, 163, 184, 0.35)", fontSize: 12, color: "rgba(148, 163, 184, 0.85)", background: "rgba(12, 14, 22, 0.85)" },
-  contextLabel: { fontSize: 12, color: "rgba(148, 163, 184, 0.8)" },
+  sourceToggle: { font: "inherit", fontSize: 11, padding: "6px 16px", borderRadius: 999, border: "none", background: "rgba(65, 77, 128, 0.96)", color: "#ffffff", cursor: "pointer", boxShadow: "0 14px 24px rgba(3, 6, 18, 0.55)" },
+  sourcePreview: { fontSize: 11, color: "#ffffff", fontStyle: "italic", marginTop: 4, whiteSpace: "pre-wrap" },
+  docs: { overflow: "auto", border: "none", borderRadius: 24, padding: 18, background: "rgba(19, 24, 54, 0.97)", boxShadow: "0 20px 40px rgba(0, 0, 0, 0.58), inset 0 0 0 2px rgba(99, 102, 241, 0.1)", color: "#ffffff" },
+  listItem: { padding: "14px 12px", borderRadius: 18, marginBottom: 12, background: "rgba(47, 58, 118, 0.95)", boxShadow: "0 14px 26px rgba(2, 6, 19, 0.62)", color: "#ffffff" },
+  contextBadge: { padding: "8px 14px", borderRadius: 14, border: "1px solid rgba(255, 255, 255, 0.6)", fontSize: 12, color: "#ffffff", background: "rgba(12, 14, 22, 0.85)" },
+  contextLabel: { fontSize: 12, color: "#ffffff" },
   kbd: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace' },
 };
 
@@ -264,6 +264,11 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
                         {m.sources.map((s, idx) => {
                           const sourceKey = `${s.chunk_id || s.doc_hash || idx}-${idx}`;
                           const isExpanded = expandedForMessage.includes(sourceKey);
+                          const fullChunkText = typeof s.chunk_text === "string" && s.chunk_text.length ? s.chunk_text : "";
+                          const fallbackPreview = typeof s.chunk_text_preview === "string" ? s.chunk_text_preview : "";
+                          const chunkText = fullChunkText || fallbackPreview;
+                          const hasChunkText = chunkText.length > 0;
+                          const previewOnly = !fullChunkText && !!fallbackPreview;
                           return (
                             <li key={sourceKey} style={styles.sourceItem}>
                               <div style={styles.sourceHeader}>
@@ -280,15 +285,15 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
                                     </span>
                                   )}
                                 </div>
-                                {s.chunk_text_preview && (
+                                {hasChunkText && (
                                   <button type="button" onClick={() => toggleSourcePreview(m.id, sourceKey)} style={{ ...styles.sourceToggle, opacity: isExpanded ? 0.85 : 1 }}>
                                     {isExpanded ? "Hide chunk" : "Show chunk"}
                                   </button>
                                 )}
                               </div>
-                              {isExpanded && s.chunk_text_preview && (
+                              {isExpanded && hasChunkText && (
                                 <div style={styles.sourcePreview}>
-                                  "{s.chunk_text_preview}..."
+                                  {previewOnly ? `"${chunkText}..."` : chunkText}
                                 </div>
                               )}
                             </li>

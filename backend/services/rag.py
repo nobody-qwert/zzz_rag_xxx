@@ -217,6 +217,7 @@ async def ask_question(req: AskRequest) -> AskResponse:
                 "order_index": chunk["order_index"],
                 "document_name": doc.get("original_name", "unknown"),
                 "total_chunks": total_chunks,
+                "chunk_text": chunk.get("text", ""),
                 "chunk_text_preview": chunk.get("text", "")[:200],
             }
         )
