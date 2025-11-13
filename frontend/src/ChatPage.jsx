@@ -26,28 +26,28 @@ function mergeSources(existing = [], incoming = []) {
 
 const styles = {
   page: { display: "flex", flexWrap: "wrap", gap: 18, alignItems: "stretch", width: "100%", minHeight: "calc(100vh - 32px)" },
-  chatCard: { flex: "2 1 540px", border: "none", borderRadius: 22, padding: "20px 22px", background: "linear-gradient(145deg, rgba(31, 41, 77, 0.98), rgba(11, 15, 27, 0.95))", boxShadow: "0 32px 64px rgba(3, 7, 18, 0.7)", display: "flex", flexDirection: "column", gap: 14, minHeight: "100%" },
-  sideCard: { flex: "1 1 320px", border: "none", borderRadius: 22, padding: "20px 20px", background: "linear-gradient(160deg, rgba(26, 33, 59, 0.95), rgba(9, 12, 22, 0.95))", boxShadow: "0 28px 56px rgba(3, 7, 18, 0.65)", display: "grid", gridTemplateRows: "auto auto 1fr", gap: 14, alignContent: "stretch", minHeight: "100%" },
+  chatCard: { flex: "2 1 540px", border: "none", borderRadius: 24, padding: "22px 24px", background: "linear-gradient(145deg, rgba(63, 76, 149, 0.98), rgba(22, 26, 55, 0.95))", boxShadow: "0 36px 72px rgba(5, 8, 25, 0.78)", display: "flex", flexDirection: "column", gap: 16, minHeight: "100%" },
+  sideCard: { flex: "1 1 320px", border: "none", borderRadius: 24, padding: "22px 22px", background: "linear-gradient(160deg, rgba(55, 68, 138, 0.97), rgba(18, 22, 48, 0.94))", boxShadow: "0 32px 64px rgba(5, 8, 25, 0.72)", display: "grid", gridTemplateRows: "auto auto 1fr", gap: 16, alignContent: "stretch", minHeight: "100%" },
   sectionHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" },
   sectionTitle: { margin: 0, fontSize: 20, fontWeight: 600, letterSpacing: 0.25 },
   badge: { padding: "6px 12px", borderRadius: 999, border: "1px solid rgba(148, 163, 184, 0.35)", fontSize: 12, color: "rgba(148, 163, 184, 0.85)", whiteSpace: "nowrap" },
-  button: { font: "inherit", fontSize: 14, padding: "9px 20px", borderRadius: 999, border: "none", background: "linear-gradient(135deg, rgba(99, 102, 241, 0.75), rgba(14, 165, 233, 0.55))", color: "#eef0ff", cursor: "pointer", boxShadow: "0 16px 32px rgba(15, 23, 42, 0.55)", transition: "transform 0.15s ease, box-shadow 0.15s ease" },
-  subtleButton: { font: "inherit", fontSize: 13, padding: "7px 16px", borderRadius: 999, border: "none", background: "rgba(37, 47, 78, 0.95)", color: "rgba(236, 248, 255, 0.95)", cursor: "pointer", boxShadow: "0 14px 26px rgba(8, 10, 25, 0.65)", transition: "transform 0.15s ease, box-shadow 0.15s ease" },
-  input: { font: "inherit", padding: "11px 20px", borderRadius: 999, border: "none", background: "rgba(13, 17, 30, 0.98)", color: "inherit", flex: 1, minWidth: 0, boxShadow: "0 0 0 2px rgba(99, 102, 241, 0.22), inset 0 2px 12px rgba(2, 6, 23, 0.65)", outline: "none" },
+  button: { font: "inherit", fontSize: 14, padding: "10px 22px", borderRadius: 999, border: "none", background: "linear-gradient(135deg, rgba(139, 92, 246, 0.92), rgba(59, 130, 246, 0.78))", color: "#f8f9ff", cursor: "pointer", boxShadow: "0 20px 40px rgba(8, 12, 32, 0.65)", transition: "transform 0.15s ease, box-shadow 0.15s ease" },
+  subtleButton: { font: "inherit", fontSize: 13, padding: "8px 18px", borderRadius: 999, border: "none", background: "rgba(66, 77, 124, 0.96)", color: "rgba(248, 250, 255, 0.96)", cursor: "pointer", boxShadow: "0 16px 30px rgba(6, 9, 25, 0.65)", transition: "transform 0.15s ease, box-shadow 0.15s ease" },
+  input: { font: "inherit", padding: "12px 22px", borderRadius: 999, border: "none", background: "rgba(21, 26, 54, 0.98)", color: "inherit", flex: 1, minWidth: 0, boxShadow: "0 0 0 2px rgba(59, 130, 246, 0.3), inset 0 2px 14px rgba(3, 6, 18, 0.7)", outline: "none" },
   muted: { fontSize: 13, color: "rgba(148, 163, 184, 0.78)" },
-  messages: { flex: 1, minHeight: 240, minWidth: 0, overflow: "auto", border: "none", borderRadius: 22, padding: 18, background: "rgba(13, 18, 32, 0.96)", whiteSpace: "pre-wrap", display: "flex", flexDirection: "column", gap: 10, boxShadow: "0 18px 38px rgba(4, 7, 15, 0.7), inset 0 0 0 1px rgba(99, 102, 241, 0.12)" },
+  messages: { flex: 1, minHeight: 240, minWidth: 0, overflow: "auto", border: "none", borderRadius: 24, padding: 20, background: "rgba(22, 27, 58, 0.98)", whiteSpace: "pre-wrap", display: "flex", flexDirection: "column", gap: 12, boxShadow: "0 22px 48px rgba(3, 5, 15, 0.75), inset 0 0 0 2px rgba(99, 102, 241, 0.14)" },
   messageList: { display: "flex", flexDirection: "column", gap: 8 },
-  userBubble: { alignSelf: "flex-end", background: "rgba(59, 130, 246, 0.25)", borderRadius: 20, padding: 14, maxWidth: "85%", boxShadow: "0 14px 28px rgba(7, 10, 20, 0.65)" },
-  assistantBubble: { alignSelf: "flex-start", background: "rgba(129, 140, 248, 0.2)", borderRadius: 20, padding: 14, maxWidth: "95%", lineHeight: 1.6, boxShadow: "0 14px 28px rgba(7, 10, 20, 0.6)" },
-  errorBubble: { alignSelf: "flex-start", background: "rgba(239, 68, 68, 0.22)", borderRadius: 20, padding: 14, maxWidth: "95%", boxShadow: "0 12px 24px rgba(239, 68, 68, 0.35)" },
+  userBubble: { alignSelf: "flex-end", background: "rgba(96, 165, 250, 0.38)", borderRadius: 22, padding: 15, maxWidth: "85%", boxShadow: "0 18px 34px rgba(5, 8, 24, 0.7)" },
+  assistantBubble: { alignSelf: "flex-start", background: "rgba(165, 180, 252, 0.32)", borderRadius: 22, padding: 15, maxWidth: "95%", lineHeight: 1.65, boxShadow: "0 18px 34px rgba(5, 8, 24, 0.65)" },
+  errorBubble: { alignSelf: "flex-start", background: "rgba(252, 165, 165, 0.32)", borderRadius: 22, padding: 15, maxWidth: "95%", boxShadow: "0 16px 28px rgba(239, 68, 68, 0.35)" },
   messageRole: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.8, color: "rgba(148, 163, 184, 0.75)", marginBottom: 4 },
   sourcesBlock: { fontSize: 12, color: "rgba(148, 163, 184, 0.78)", marginTop: 10 },
   sourceItem: { marginBottom: 6, paddingBottom: 6, borderBottom: "1px solid rgba(148, 163, 184, 0.08)" },
   sourceHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" },
-  sourceToggle: { font: "inherit", fontSize: 11, padding: "5px 14px", borderRadius: 999, border: "none", background: "rgba(40, 54, 85, 0.95)", color: "rgba(226, 232, 240, 0.95)", cursor: "pointer", boxShadow: "0 10px 18px rgba(2, 6, 23, 0.5)" },
+  sourceToggle: { font: "inherit", fontSize: 11, padding: "6px 16px", borderRadius: 999, border: "none", background: "rgba(65, 77, 128, 0.96)", color: "rgba(233, 238, 255, 0.96)", cursor: "pointer", boxShadow: "0 14px 24px rgba(3, 6, 18, 0.55)" },
   sourcePreview: { fontSize: 11, color: "rgba(148, 163, 184, 0.6)", fontStyle: "italic", marginTop: 4 },
-  docs: { overflow: "auto", border: "none", borderRadius: 22, padding: 16, background: "rgba(12, 17, 29, 0.95)", boxShadow: "0 16px 32px rgba(0, 0, 0, 0.5), inset 0 0 0 1px rgba(99, 102, 241, 0.08)" },
-  listItem: { padding: "12px 10px", borderRadius: 16, marginBottom: 10, background: "rgba(30, 40, 68, 0.92)", boxShadow: "0 10px 20px rgba(3, 7, 18, 0.55)" },
+  docs: { overflow: "auto", border: "none", borderRadius: 24, padding: 18, background: "rgba(19, 24, 54, 0.97)", boxShadow: "0 20px 40px rgba(0, 0, 0, 0.58), inset 0 0 0 2px rgba(99, 102, 241, 0.1)" },
+  listItem: { padding: "14px 12px", borderRadius: 18, marginBottom: 12, background: "rgba(47, 58, 118, 0.95)", boxShadow: "0 14px 26px rgba(2, 6, 19, 0.62)" },
   contextBadge: { padding: "8px 14px", borderRadius: 14, border: "1px solid rgba(148, 163, 184, 0.35)", fontSize: 12, color: "rgba(148, 163, 184, 0.85)", background: "rgba(12, 14, 22, 0.85)" },
   contextLabel: { fontSize: 12, color: "rgba(148, 163, 184, 0.8)" },
   kbd: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace' },
@@ -231,7 +231,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
         </div>
 
         {warmingUp && !llmReady && (
-          <div style={{ ...styles.muted, background: "rgba(250, 204, 21, 0.12)", padding: 12, borderRadius: 16, boxShadow: "0 10px 20px rgba(251, 191, 36, 0.25)" }}>
+          <div style={{ ...styles.muted, background: "rgba(250, 204, 21, 0.22)", padding: 14, borderRadius: 18, boxShadow: "0 16px 32px rgba(251, 191, 36, 0.35)" }}>
             🔥 Warming up the local LLM... Please wait.
           </div>
         )}
@@ -305,7 +305,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
         </div>
 
         {pendingFollowUp && (
-          <div style={{ border: "none", borderRadius: 18, padding: 12, background: "rgba(24, 27, 40, 0.8)", display: "flex", flexDirection: "column", gap: 10, boxShadow: "0 16px 32px rgba(2, 6, 23, 0.4)" }}>
+          <div style={{ border: "none", borderRadius: 22, padding: 16, background: "rgba(32, 37, 78, 0.92)", display: "flex", flexDirection: "column", gap: 12, boxShadow: "0 22px 40px rgba(4, 7, 20, 0.55)" }}>
             <div style={{ ...styles.muted, fontSize: 13 }}>
               The assistant stopped early (finish reason: {messages.find((m) => m.id === pendingFollowUp.messageId)?.finishReason || "unknown"}).
               Choose <strong>Continue</strong> to keep generating or <strong>Abort</strong> to accept the current response.
