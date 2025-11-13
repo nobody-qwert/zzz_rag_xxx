@@ -39,7 +39,7 @@ async def delete_document(doc_hash: str) -> Dict[str, Any]:
 
 @router.get("/parsers")
 async def list_parsers() -> Dict[str, Any]:
-    options = unique_ordered([settings.ocr_parser_key, settings.large_chunk_parser_key, "pymupdf"])
+    options = unique_ordered([settings.ocr_parser_key, "pymupdf"])
     return {"default": settings.ocr_parser_key, "options": options}
 
 
@@ -58,17 +58,11 @@ async def debug_parsed_text(
         raise HTTPException(status_code=404, detail=f"No extraction found for parser '{parser_key}'")
     text = row["text"] or ""
 
-    chunks = await document_store.fetch_chunks(doc_hash=doc_hash, parser=parser)
-    total_tokens = sum(chunk.get("token_count", 0) for chunk in chunks)
-    chunk_count = len(chunks)
-
     return {
-        "parser": parser,
+        "parser": parser_key,
         "document_name": doc.get("original_name", "unknown"),
         "file_size": doc.get("size", 0),
         "extracted_chars": len(text),
-        "total_tokens": total_tokens,
-        "chunk_count": chunk_count,
         "preview_chars": min(max_chars, len(text)),
         "truncated": len(text) > max_chars,
         "preview": text[:max_chars],
