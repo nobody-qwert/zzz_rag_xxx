@@ -234,6 +234,16 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
         chunk_views = chunk_text_multi(chosen_text, chunk_specs)
         small_chunks = chunk_views.get("small", [])
         large_chunks = chunk_views.get("large", [])
+        if not small_chunks:
+            parser_used = chosen_meta.get("parser_used")
+            parser_reason = chosen_meta.get("reason")
+            details = [f"parser={parser_used or 'unknown'}"]
+            if parser_reason:
+                details.append(f"reason={parser_reason}")
+            raise RuntimeError(
+                f"No text extracted for document '{display_name}'. "
+                + ", ".join(details)
+            )
         small_chunk_rows = [(c.chunk_id, c.order_index, c.text, c.token_count) for c in small_chunks]
         large_chunk_rows = [(c.chunk_id, c.order_index, c.text, c.token_count) for c in large_chunks]
         await document_store.replace_chunks(doc_hash, settings.ocr_parser_key, small_chunk_rows)
@@ -326,14 +336,60 @@ async def _call_ocr_module(doc_hash: str, doc_path: Path) -> Dict[str, Any]:
                 files = {"file": (filename, file_obj, content_type)}
                 response = await client.post(f"{settings.ocr_module_url}/parse", data=form_data, files=files)
             response.raise_for_status()
-            data = response.json()
+            job_info = response.json()
         except httpx.HTTPStatusError as exc:
             detail = exc.response.text if exc.response is not None else str(exc)
             raise RuntimeError(f"OCR module returned {exc.response.status_code}: {detail}") from exc
         except httpx.RequestError as exc:
             raise RuntimeError(f"OCR module request failed: {exc}") from exc
 
-    return data
+        job_id = job_info.get("job_id")
+        if not job_id:
+            raise RuntimeError("OCR module response missing job_id")
+        status_url = f"{settings.ocr_module_url}/jobs/{job_id}"
+        result_url = f"{status_url}/result"
+        deadline = time.perf_counter() + settings.ocr_module_timeout
+        poll_interval = max(0.5, float(settings.ocr_status_poll_interval))
+
+        retry_delay = min(2.0, poll_interval)
+
+        while True:
+            if time.perf_counter() > deadline:
+                raise RuntimeError(f"OCR module job {job_id} timed out after {settings.ocr_module_timeout} seconds")
+            try:
+                status_resp = await client.get(status_url)
+                status_resp.raise_for_status()
+                status_data = status_resp.json()
+            except httpx.TransportError as exc:
+                logger.warning("OCR status poll for job %s failed: %s — retrying", job_id, exc)
+                await asyncio.sleep(retry_delay)
+                continue
+            except httpx.HTTPStatusError as exc:
+                detail = exc.response.text if exc.response is not None else str(exc)
+                raise RuntimeError(f"OCR module status error {exc.response.status_code}: {detail}") from exc
+            except httpx.RequestError as exc:
+                raise RuntimeError(f"OCR module status request failed: {exc}") from exc
+
+            status_value = (status_data.get("status") or "").lower()
+            if status_value == "done":
+                try:
+                    result_resp = await client.get(result_url)
+                    result_resp.raise_for_status()
+                    return result_resp.json()
+                except httpx.TransportError as exc:
+                    logger.warning("OCR result fetch for job %s failed: %s — retrying", job_id, exc)
+                    await asyncio.sleep(retry_delay)
+                    continue
+                except httpx.HTTPStatusError as exc:
+                    detail = exc.response.text if exc.response is not None else str(exc)
+                    raise RuntimeError(f"OCR module result error {exc.response.status_code}: {detail}") from exc
+                except httpx.RequestError as exc:
+                    raise RuntimeError(f"OCR module result request failed: {exc}") from exc
+            if status_value == "error":
+                error_detail = status_data.get("error") or "unknown error"
+                raise RuntimeError(f"OCR module job {job_id} failed: {error_detail}")
+
+            await asyncio.sleep(poll_interval)
 
 
 async def _compute_embeddings_for_chunks(

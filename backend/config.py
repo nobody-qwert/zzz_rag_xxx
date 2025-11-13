@@ -34,6 +34,7 @@ class AppSettings:
     llm_base_url: str
     llm_api_key: str
     llm_model: str
+    ocr_status_poll_interval: float
 
 
 def _int_env(name: str, default: str) -> int:
@@ -67,6 +68,7 @@ def load_settings() -> AppSettings:
     large_chunk_size = _int_env("LARGE_CHUNK_SIZE", "1600")
     large_chunk_left_overlap = _int_env("LARGE_CHUNK_LEFT_OVERLAP", "100")
     large_chunk_right_overlap = _int_env("LARGE_CHUNK_RIGHT_OVERLAP", "100")
+    ocr_status_poll_interval = _float_env("OCR_STATUS_POLL_INTERVAL", "5")
 
     return AppSettings(
         data_dir=data_dir,
@@ -102,4 +104,5 @@ def load_settings() -> AppSettings:
         llm_base_url=_str_env("LLM_BASE_URL"),
         llm_api_key=_str_env("LLM_API_KEY"),
         llm_model=_str_env("LLM_MODEL"),
+        ocr_status_poll_interval=ocr_status_poll_interval,
     )

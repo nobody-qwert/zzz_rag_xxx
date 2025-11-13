@@ -2,6 +2,8 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 from uuid import uuid4
@@ -41,9 +43,66 @@ MINERU_FORMULA_ENABLE = _env_bool("MINERU_FORMULA_ENABLE", True)
 MINERU_WARMUP_ON_STARTUP = _env_bool("MINERU_WARMUP_ON_STARTUP", False)
 
 
+def _utc_now() -> str:
+    return datetime.now(tz=timezone.utc).isoformat(timespec="seconds")
+
+
+@dataclass
+class OCRJob:
+    job_id: str
+    doc_hash: str
+    filename: str
+    parse_method: str
+    lang: str
+    table_enable: bool
+    formula_enable: bool
+    pdf_path: Path
+    status: str = "queued"
+    created_at: str = field(default_factory=_utc_now)
+    updated_at: str = field(default_factory=_utc_now)
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    error: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+    text: Optional[str] = None
+
+    def as_status_payload(self) -> Dict[str, Any]:
+        return {
+            "job_id": self.job_id,
+            "doc_hash": self.doc_hash,
+            "filename": self.filename,
+            "status": self.status,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+            "error": self.error,
+        }
+
+
+jobs: Dict[str, OCRJob] = {}
+
+
 class ParseResponse(BaseModel):
     text: str
     metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class JobQueuedResponse(BaseModel):
+    job_id: str
+    status: str
+
+
+class JobStatusResponse(BaseModel):
+    job_id: str
+    doc_hash: str
+    filename: str
+    status: str
+    created_at: str
+    updated_at: str
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    error: Optional[str] = None
 
 
 @asynccontextmanager
@@ -68,6 +127,13 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="MinerU OCR Module", version="0.1.0", lifespan=lifespan)
+
+
+def _job_or_404(job_id: str) -> OCRJob:
+    job = jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
 
 
 async def _persist_upload(doc_hash: str, upload: UploadFile) -> Path:
@@ -96,7 +162,7 @@ async def healthz() -> Dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post("/parse", response_model=ParseResponse)
+@app.post("/parse", response_model=JobQueuedResponse)
 async def parse_document(
     doc_hash: str = Form(...),
     file: UploadFile = File(...),
@@ -104,7 +170,7 @@ async def parse_document(
     lang: Optional[str] = Form(None),
     table_enable: Optional[bool] = Form(None),
     formula_enable: Optional[bool] = Form(None),
-) -> ParseResponse:
+) -> JobQueuedResponse:
     try:
         pdf_path = await _persist_upload(doc_hash, file)
     except Exception as exc:
@@ -116,23 +182,66 @@ async def parse_document(
     selected_formula = formula_enable if formula_enable is not None else MINERU_FORMULA_ENABLE
     out_dir = OCR_OUTPUT_DIR / doc_hash
 
+    job_id = uuid4().hex
+    job = OCRJob(
+        job_id=job_id,
+        doc_hash=doc_hash,
+        filename=file.filename or f"{doc_hash}.pdf",
+        parse_method=selected_parse_method,
+        lang=selected_lang,
+        table_enable=selected_table,
+        formula_enable=selected_formula,
+        pdf_path=pdf_path,
+    )
+    jobs[job_id] = job
+    asyncio.create_task(_process_job(job, out_dir))
+    return JobQueuedResponse(job_id=job.job_id, status=job.status)
+
+
+async def _process_job(job: OCRJob, out_dir: Path) -> None:
     try:
+        job.status = "running"
+        job.started_at = _utc_now()
+        job.updated_at = job.started_at
         result = await asyncio.to_thread(
             run_mineru,
-            pdf_path,
+            job.pdf_path,
             out_dir,
-            parse_method=selected_parse_method,
-            lang=selected_lang,
-            table_enable=selected_table,
-            formula_enable=selected_formula,
+            parse_method=job.parse_method,
+            lang=job.lang,
+            table_enable=job.table_enable,
+            formula_enable=job.formula_enable,
         )
+        job.text = result.text
+        job.metadata = result.metadata
+        job.status = "done"
+        job.finished_at = _utc_now()
     except Exception as exc:
-        logger.exception("MinerU parse failed for %s", pdf_path)
-        raise HTTPException(status_code=500, detail=f"MinerU parsing failed: {exc}") from exc
+        job.error = str(exc)
+        job.status = "error"
+        job.finished_at = _utc_now()
+        logger.exception("MinerU parse failed for %s (job %s)", job.pdf_path, job.job_id)
     finally:
-        pdf_path.unlink(missing_ok=True)
+        job.updated_at = _utc_now()
+        if job.pdf_path is not None:
+            job.pdf_path.unlink(missing_ok=True)
+            job.pdf_path = None
 
-    return ParseResponse(text=result.text, metadata=result.metadata)
+
+@app.get("/jobs/{job_id}", response_model=JobStatusResponse)
+async def get_job_status(job_id: str) -> JobStatusResponse:
+    job = _job_or_404(job_id)
+    return JobStatusResponse(**job.as_status_payload())
+
+
+@app.get("/jobs/{job_id}/result", response_model=ParseResponse)
+async def get_job_result(job_id: str) -> ParseResponse:
+    job = _job_or_404(job_id)
+    if job.status != "done":
+        raise HTTPException(status_code=409, detail=f"Job not complete (status={job.status})")
+    if job.text is None:
+        raise HTTPException(status_code=500, detail="Job completed without text output")
+    return ParseResponse(text=job.text, metadata=job.metadata or {})
 
 
 @app.post("/warmup")
