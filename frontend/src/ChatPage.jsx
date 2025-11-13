@@ -1,5 +1,9 @@
 import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 
 async function readJsonSafe(res) {
   const ct = (res.headers.get("content-type") || "").toLowerCase();
@@ -46,11 +50,34 @@ const styles = {
   sourceHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" },
   sourceToggle: { font: "inherit", fontSize: 11, padding: "6px 16px", borderRadius: 999, border: "none", background: "rgba(65, 77, 128, 0.96)", color: "#ffffff", cursor: "pointer", boxShadow: "0 14px 24px rgba(3, 6, 18, 0.55)" },
   sourcePreview: { fontSize: 11, color: "#ffffff", fontStyle: "italic", marginTop: 4, whiteSpace: "pre-wrap" },
+  markdown: { fontSize: 14, lineHeight: 1.65, color: "#fbfcff", whiteSpace: "normal", wordBreak: "break-word" },
+  markdownTable: { width: "100%", borderCollapse: "collapse", margin: "12px 0" },
+  tableCell: { border: "1px solid rgba(148, 163, 184, 0.18)", padding: "8px 10px", textAlign: "left" },
+  inlineCode: { background: "rgba(15, 23, 42, 0.6)", borderRadius: 8, padding: "2px 6px", fontSize: 13, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace' },
+  codeBlock: { background: "rgba(15, 23, 42, 0.75)", borderRadius: 16, padding: "14px 16px", margin: "12px 0", overflowX: "auto", fontSize: 13, border: "1px solid rgba(148, 163, 184, 0.25)" },
   docs: { overflow: "auto", border: "none", borderRadius: 24, padding: 18, background: "rgba(19, 24, 54, 0.97)", boxShadow: "0 20px 40px rgba(0, 0, 0, 0.58), inset 0 0 0 2px rgba(99, 102, 241, 0.1)", color: "#ffffff" },
   listItem: { padding: "14px 12px", borderRadius: 18, marginBottom: 12, background: "rgba(47, 58, 118, 0.95)", boxShadow: "0 14px 26px rgba(2, 6, 19, 0.62)", color: "#ffffff" },
   contextBadge: { padding: "8px 14px", borderRadius: 14, border: "1px solid rgba(255, 255, 255, 0.6)", fontSize: 12, color: "#ffffff", background: "rgba(12, 14, 22, 0.85)" },
   contextLabel: { fontSize: 12, color: "#ffffff" },
   kbd: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace' },
+};
+
+const markdownRemarkPlugins = [remarkGfm, remarkMath];
+const markdownRehypePlugins = [rehypeKatex];
+const markdownComponents = {
+  table: (props) => <table style={styles.markdownTable} {...props} />,
+  th: (props) => <th style={styles.tableCell} {...props} />,
+  td: (props) => <td style={styles.tableCell} {...props} />,
+  code: ({ inline, children = [], ...props }) =>
+    inline ? (
+      <code style={styles.inlineCode} {...props}>
+        {children}
+      </code>
+    ) : (
+      <pre style={styles.codeBlock}>
+        <code {...props}>{String(children).replace(/\n$/, "")}</code>
+      </pre>
+    ),
 };
 
 export default function ChatPage({ onAskingChange, warmupApi, llmReady, documents = [] }) {
@@ -248,7 +275,15 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
                 return (
                   <div key={m.id || `${m.role}-${i}-${Math.abs(m.content?.length || 0)}`} style={m.error ? styles.errorBubble : m.role === "user" ? styles.userBubble : styles.assistantBubble}>
                   <div style={styles.messageRole}>{m.role === "user" ? "You" : "Assistant"}</div>
-                  <div>{m.content}</div>
+                  <div style={styles.markdown}>
+                    <ReactMarkdown
+                      remarkPlugins={markdownRemarkPlugins}
+                      rehypePlugins={markdownRehypePlugins}
+                      components={markdownComponents}
+                    >
+                      {m.content || ""}
+                    </ReactMarkdown>
+                  </div>
                   {m.role === "assistant" && m.pendingFollowUp && !m.error && (
                     <div style={{ ...styles.muted, marginTop: 8 }}>
                       Response paused because it reached the token limit. Continue or abort to proceed.
