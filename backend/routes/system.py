@@ -21,7 +21,7 @@ router = APIRouter()
 
 def _format_chunk_config(spec) -> str:
     return (
-        f"{spec.config_id} ({spec.label}) core={spec.core_size} left={spec.left_overlap} "
+        f"core={spec.core_size} left={spec.left_overlap} "
         f"right={spec.right_overlap} step={spec.step_size}"
     )
 
