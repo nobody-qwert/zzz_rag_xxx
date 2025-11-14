@@ -155,7 +155,6 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
         jobs_registry[job_id]["progress"] = payload
 
     start_total = time.perf_counter()
-    pymupdf_time = None
     mineru_time = None
     chunking_time = None
     embedding_time = None
@@ -163,29 +162,9 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
     try:
         await document_store.mark_job_started(job_id)
         await document_store.update_document_status(doc_hash, "processing")
-        set_progress("prepare", 0.0, stage="starting")
-
-        start_pymupdf = time.perf_counter()
-        py_out = await _extract_pymupdf(doc_path)
-        pymupdf_time = time.perf_counter() - start_pymupdf
-        set_progress(
-            "prepare",
-            100.0,
-            stage="pymupdf_extract",
-            pages=py_out.get("pages", 0),
-        )
-        await document_store.upsert_extraction(
-            doc_hash,
-            "pymupdf",
-            text=py_out["text"],
-            meta_json=json.dumps({"pages": py_out.get("pages", 0)}),
-        )
-
-        chosen_text = ""
-        chosen_meta: Dict[str, Any] = {"parser_used": settings.ocr_parser_key}
+        set_progress("ocr", 0.0, stage="starting")
 
         start_mineru = time.perf_counter()
-        set_progress("ocr", 0.0, stage="queued")
 
         def ocr_progress_callback(data: Dict[str, Any]) -> None:
             if not data:
@@ -222,7 +201,6 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
             text=ocr_text,
             meta_json=json.dumps({**ocr_meta, "source": "ocr"}),
         )
-        chosen_text = ocr_text
         set_progress("ocr", 100.0, stage="completed")
 
         start_chunking = time.perf_counter()
@@ -281,19 +259,11 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
             )
 
         set_progress("chunking", 0.0, stage="starting")
-        chunk_views = chunk_text_multi(chosen_text, chunk_specs, progress_cb=chunk_progress_callback)
+        chunk_views = chunk_text_multi(ocr_text, chunk_specs, progress_cb=chunk_progress_callback)
         small_chunks = chunk_views.get("small", [])
         large_chunks = chunk_views.get("large", [])
         if not small_chunks:
-            parser_used = chosen_meta.get("parser_used")
-            parser_reason = chosen_meta.get("reason")
-            details = [f"parser={parser_used or 'unknown'}"]
-            if parser_reason:
-                details.append(f"reason={parser_reason}")
-            raise RuntimeError(
-                f"No text extracted for document '{display_name}'. "
-                + ", ".join(details)
-            )
+            raise RuntimeError(f"No OCR text extracted for document '{display_name}'")
         small_chunk_rows = [(c.chunk_id, c.order_index, c.text, c.token_count) for c in small_chunks]
         large_chunk_rows = [(c.chunk_id, c.order_index, c.text, c.token_count) for c in large_chunks]
         await document_store.replace_chunks(doc_hash, settings.ocr_parser_key, small_chunk_rows)
@@ -345,7 +315,6 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
         try:
             await document_store.save_performance_metrics(
                 doc_hash,
-                pymupdf_time_sec=pymupdf_time,
                 mineru_time_sec=mineru_time,
                 chunking_time_sec=chunking_time,
                 embedding_time_sec=embedding_time,
@@ -369,27 +338,6 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
         current_percent = jobs_registry.get(job_id, {}).get("progress", {}).get("percent", 0.0)
         set_progress("error", current_percent, stage="failed", message=str(exc))
         logger.exception("Job %s failed: %s", job_id, exc)
-
-
-async def _extract_pymupdf(path: Path) -> Dict[str, Any]:
-    try:
-        import fitz  # type: ignore
-    except Exception as exc:
-        raise RuntimeError("PyMuPDF not installed") from exc
-
-    def _run() -> Dict[str, Any]:
-        doc = fitz.open(path)
-        try:
-            parts: List[str] = []
-            for page in doc:
-                text = page.get_text("text")
-                if text and text.strip():
-                    parts.append(text)
-            return {"text": "\n\n".join(p.strip() for p in parts if p.strip()), "pages": len(doc)}
-        finally:
-            doc.close()
-
-    return await asyncio.to_thread(_run)
 
 
 async def _call_ocr_module(

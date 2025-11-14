@@ -23,14 +23,13 @@ _This note is based strictly on the current backend code (mainly `backend/servic
 2. An `asyncio.create_task` immediately launches `_process_job(job_id, path, hash, display_name)`. Because this queue is purely in-memory, restarts lose the outstanding job list and active tasks.
 
 ### 3. Background job `_process_job`
-1. Runtime bookkeeping: it records per-stage durations (`pymupdf_time`, `mineru_time`, `chunking_time`, `embedding_time`, plus `total_time`). A local `update` helper keeps `jobs_registry` and the document status in sync.
+1. Runtime bookkeeping: it records per-stage durations (`mineru_time`, `chunking_time`, `embedding_time`, plus `total_time`). A local `update` helper keeps `jobs_registry` and the document status in sync.
 2. State transition: `document_store.mark_job_started` flips the DB job to `running`, and the document status is set to `processing`.
-3. **PyMuPDF extraction**: `_extract_pymupdf` runs inside `asyncio.to_thread`, extracts text per page, joins with blank lines, records the page count, and stores the result in `extractions` with parser key `pymupdf`. This text now serves purely as a debugging reference and fallback artifact stored in the DB.
-4. **Mandatory OCR**:
-   - `_call_ocr_module` always runs, streaming the stored file to `POST {settings.ocr_module_url}/parse` with `doc_hash` in `form_data`. The response must contain `text`; otherwise an error is raised and the ingestion job fails.
+3. **Mandatory OCR**:
+   - `_call_ocr_module` runs first, streaming the stored file to `POST {settings.ocr_module_url}/parse` with `doc_hash` in `form_data`. The response must contain `text`; otherwise an error is raised and the ingestion job fails.
    - Successful OCR output is merged into the `extractions` table using `settings.ocr_parser_key` (defaults to `"mineru"`). Metadata is augmented with the source (`ocr`).
-   - The text that feeds chunking/embeddings (`chosen_text`) is always the OCR text. If the OCR service errors or returns empty text, `_process_job` raises so the document stays in `error` status instead of silently falling back to PyMuPDF.
-5. **Chunking**:
+   - The text that feeds chunking/embeddings is always the OCR text. If the OCR service errors or returns empty text, `_process_job` raises so the document stays in `error` status instead of continuing.
+4. **Chunking**:
    - The ingestion worker tokenizes once and now generates two synchronized views using `chunk_text_multi` (`backend/chunking.py`):
      - **Small chunks** → core window of 200 tokens with 60-token guard bands on both sides (defaults driven by `CHUNK_SIZE`/`CHUNK_OVERLAP`). These are stepped every 200 tokens so each core is disjoint; they remain the primary retrieval surface.
      - **Large chunks** → core window of 1600 tokens (exactly eight small cores) padded by 100 tokens on each side, stepped every 1600 tokens to stay aligned. They’re stored under `settings.large_chunk_parser_key` for future use.
@@ -68,10 +67,9 @@ flowchart TD
     D --> E["Upsert document row → status pending"]
     E --> F["_queue_job → jobs_registry + jobs table"]
     F --> G["asyncio task _process_job"]
-    G --> H["PyMuPDF extraction\n(store parser = pymupdf)"]
-    H --> I["Call OCR microservice\nstore parser = settings.ocr_parser_key"]
-    I -->|success| L["Use OCR text for downstream steps"]
-    I -->|failure| ERR["Job fails (document stays in error status)"]
+    G --> H["Call OCR microservice\nstore parser = settings.ocr_parser_key"]
+    H -->|success| L["Use OCR text for downstream steps"]
+    H -->|failure| ERR["Job fails (document stays in error status)"]
     L --> M["Slide chunks\nsmall = 60+200+60, large = 100+1600+100"]
     M --> N["Persist dual chunk sets\n(small parser + large parser)"]
     N --> O["Embed SMALL chunks only\n(~2048 token context limit)"]
@@ -81,7 +79,7 @@ flowchart TD
 ```
 
 ## Status Checklist
-- Happy-path ingestion covers: upload validation, deduping, disk persistence, DB tracking, PyMuPDF reference extraction, mandatory OCR, chunking, embedding, metrics, completion, and status reporting.
+- Happy-path ingestion covers: upload validation, deduping, disk persistence, DB tracking, mandatory OCR, chunking, embedding, metrics, completion, and status reporting.
 - Recovery flows implemented: retrying from stored binaries, deletion with safety checks, job status inspection, OCR warmup.
 - Remaining caveats observed in code:
   - Job tracking is memory-only, so restarts orphan active work.

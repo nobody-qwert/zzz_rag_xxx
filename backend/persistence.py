@@ -119,7 +119,6 @@ class DocumentStore:
                     """
                     CREATE TABLE IF NOT EXISTS performance_metrics (
                         doc_hash TEXT PRIMARY KEY,
-                        pymupdf_time_sec REAL,
                         mineru_time_sec REAL,
                         chunking_time_sec REAL,
                         embedding_time_sec REAL,
@@ -462,7 +461,6 @@ class DocumentStore:
         self,
         doc_hash: str,
         *,
-        pymupdf_time_sec: Optional[float] = None,
         mineru_time_sec: Optional[float] = None,
         chunking_time_sec: Optional[float] = None,
         embedding_time_sec: Optional[float] = None,
@@ -473,12 +471,11 @@ class DocumentStore:
             await conn.execute(
                 """
                 INSERT INTO performance_metrics (
-                    doc_hash, pymupdf_time_sec, mineru_time_sec, chunking_time_sec,
+                    doc_hash, mineru_time_sec, chunking_time_sec,
                     embedding_time_sec, total_time_sec, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(doc_hash) DO UPDATE SET
-                    pymupdf_time_sec=excluded.pymupdf_time_sec,
                     mineru_time_sec=excluded.mineru_time_sec,
                     chunking_time_sec=excluded.chunking_time_sec,
                     embedding_time_sec=excluded.embedding_time_sec,
@@ -487,7 +484,6 @@ class DocumentStore:
                 """,
                 (
                     doc_hash,
-                    pymupdf_time_sec,
                     mineru_time_sec,
                     chunking_time_sec,
                     embedding_time_sec,

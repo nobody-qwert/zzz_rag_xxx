@@ -95,7 +95,7 @@ const styles = {
 };
 
 const FALLBACK_PARSER = "mineru";
-const FALLBACK_PARSER_OPTIONS = [FALLBACK_PARSER, "pymupdf"];
+const FALLBACK_PARSER_OPTIONS = [FALLBACK_PARSER];
 const IN_PROGRESS_STATUSES = new Set(["processing", "ingesting", "queued", "pending", "running", "parsing", "uploading"]);
 const COMPLETED_STATUSES = new Set(["processed", "done", "completed", "ready"]);
 
@@ -735,14 +735,11 @@ export default function IngestPage({ systemStatus = {} }) {
 
                         {showPerf && isExpanded && (
                           <div style={styles.docPerfDetails}>
-                            {perf.pymupdf_time_sec != null && (
-                              <div>• PyMuPDF: {perf.pymupdf_time_sec.toFixed(2)}s</div>
-                            )}
                             {perf.mineru_time_sec != null && (
                               <div>• MinerU: {perf.mineru_time_sec.toFixed(2)}s</div>
                             )}
                             {perf.mineru_time_sec == null && (
-                              <div style={{ opacity: 0.6 }}>• MinerU: skipped</div>
+                              <div style={{ opacity: 0.6 }}>• MinerU: unavailable</div>
                             )}
                             {perf.chunking_time_sec != null && (
                               <div>• Chunking: {perf.chunking_time_sec.toFixed(2)}s</div>

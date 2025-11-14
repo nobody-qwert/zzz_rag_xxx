@@ -19,7 +19,6 @@ services:
       DATA_DIR: ${DATA_DIR:-/app_data/docs}
       INDEX_DIR: ${INDEX_DIR:-/app_data/runtime}
       DOC_STORE_PATH: ${DOC_STORE_PATH:-/app_data/rag_meta.db}
-      MIN_PYMUPDF_CHARS_PER_PAGE: ${MIN_PYMUPDF_CHARS_PER_PAGE:-300}
       OCR_MODULE_URL: ${OCR_MODULE_URL:-http://ocr-module:8000}
       OCR_MODULE_TIMEOUT: ${OCR_MODULE_TIMEOUT:-180}
       OCR_PARSER_KEY: ${OCR_PARSER_KEY:-mineru}

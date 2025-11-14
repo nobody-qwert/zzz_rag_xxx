@@ -8,12 +8,10 @@ try:
     from ..dependencies import document_store, settings
     from .helpers import format_document_row
     from ..services.ingestion import delete_document as delete_document_service
-    from ..utils.files import unique_ordered
 except ImportError:  # pragma: no cover
     from dependencies import document_store, settings  # type: ignore
     from routes.helpers import format_document_row  # type: ignore
     from services.ingestion import delete_document as delete_document_service  # type: ignore
-    from utils.files import unique_ordered  # type: ignore
 
 router = APIRouter()
 
@@ -39,8 +37,7 @@ async def delete_document(doc_hash: str) -> Dict[str, Any]:
 
 @router.get("/parsers")
 async def list_parsers() -> Dict[str, Any]:
-    options = unique_ordered([settings.ocr_parser_key, "pymupdf"])
-    return {"default": settings.ocr_parser_key, "options": options}
+    return {"default": settings.ocr_parser_key, "options": [settings.ocr_parser_key]}
 
 
 @router.get("/debug/parsed_text/{doc_hash}")
