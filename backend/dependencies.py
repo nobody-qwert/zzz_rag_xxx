@@ -13,7 +13,7 @@ except ImportError:  # pragma: no cover - script fallback
     from persistence import DocumentStore  # type: ignore
 
 settings = load_settings()
-document_store = DocumentStore(settings.doc_store_path)
+document_store = DocumentStore(settings.doc_store_path, chunking_configs=settings.chunking_configs)
 jobs_registry: Dict[str, Dict[str, Any]] = {}
 
 

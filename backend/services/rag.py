@@ -73,21 +73,23 @@ async def ask_question(req: AskRequest) -> AskResponse:
     if distilled_vec is None:
         raise HTTPException(status_code=500, detail="Failed to embed query")
 
-    parser_specs: List[Dict[str, str]] = [{"parser": settings.ocr_parser_key, "scale": "small"}]
+    parser_specs: List[Dict[str, str]] = [
+        {"config_id": settings.chunk_config_small_id, "scale": "small"}
+    ]
     if (
-        settings.large_chunk_parser_key
-        and settings.large_chunk_parser_key != settings.ocr_parser_key
+        settings.chunk_config_large_id
+        and settings.chunk_config_large_id != settings.chunk_config_small_id
     ):
-        parser_specs.append({"parser": settings.large_chunk_parser_key, "scale": "large"})
+        parser_specs.append({"config_id": settings.chunk_config_large_id, "scale": "large"})
 
     chunks: List[Dict[str, Any]] = []
     for spec in parser_specs:
-        parser_key = spec["parser"]
+        config_id = spec["config_id"]
         scale = spec["scale"]
-        parser_chunks = await document_store.fetch_chunks(parser=parser_key)
+        parser_chunks = await document_store.fetch_chunks(chunk_config_id=config_id)
         for chunk in parser_chunks:
             chunk_copy = dict(chunk)
-            chunk_copy["parser"] = parser_key
+            chunk_copy["chunk_config_id"] = config_id
             chunk_copy["scale"] = scale
             chunks.append(chunk_copy)
 

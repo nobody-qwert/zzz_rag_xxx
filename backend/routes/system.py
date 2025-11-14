@@ -19,6 +19,20 @@ except ImportError:  # pragma: no cover
 router = APIRouter()
 
 
+def _format_chunk_config(spec) -> str:
+    return (
+        f"{spec.config_id} ({spec.label}) core={spec.core_size} left={spec.left_overlap} "
+        f"right={spec.right_overlap} step={spec.step_size}"
+    )
+
+
+def _get_chunk_config(config_id):
+    for spec in settings.chunking_configs:
+        if spec.config_id == config_id:
+            return spec
+    return None
+
+
 def _settings_snapshot() -> Dict[str, Dict[str, Any]]:
     env = os.environ
     return {
@@ -34,7 +48,14 @@ def _settings_snapshot() -> Dict[str, Dict[str, Any]]:
             "large_chunk_size": settings.large_chunk_size,
             "large_chunk_left_overlap": settings.large_chunk_left_overlap,
             "large_chunk_right_overlap": settings.large_chunk_right_overlap,
-            "large_chunk_parser_key": settings.large_chunk_parser_key,
+            "chunk_config_small_id": settings.chunk_config_small_id,
+            "chunk_config_large_id": settings.chunk_config_large_id,
+            "small": _format_chunk_config(
+                _get_chunk_config(settings.chunk_config_small_id) or settings.chunking_configs[0]
+            ),
+            "large": _format_chunk_config(
+                _get_chunk_config(settings.chunk_config_large_id) or settings.chunking_configs[-1]
+            ),
         },
         "embedding": {
             "base_url": env.get("EMBEDDING_BASE_URL", ""),

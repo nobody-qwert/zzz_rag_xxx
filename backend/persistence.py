@@ -6,7 +6,7 @@ import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import aiosqlite
 import numpy as np
@@ -25,11 +25,16 @@ class EmbeddingRow:
     vector: np.ndarray  # float32
 
 
+if TYPE_CHECKING:  # pragma: no cover
+    from .config import ChunkingConfigSpec
+
+
 class DocumentStore:
-    def __init__(self, db_path: Path) -> None:
+    def __init__(self, db_path: Path, *, chunking_configs: Optional[Sequence["ChunkingConfigSpec"]] = None) -> None:
         self.db_path = Path(db_path)
         self._init_lock = asyncio.Lock()
         self._initialized = False
+        self._chunking_configs: List["ChunkingConfigSpec"] = list(chunking_configs or [])
 
     async def init(self) -> None:
         async with self._init_lock:
@@ -90,14 +95,29 @@ class DocumentStore:
 
                 await conn.execute(
                     """
+                    CREATE TABLE IF NOT EXISTS chunking_configs (
+                        config_id TEXT PRIMARY KEY,
+                        label TEXT NOT NULL,
+                        description TEXT,
+                        core_size INTEGER NOT NULL,
+                        left_overlap INTEGER NOT NULL,
+                        right_overlap INTEGER NOT NULL,
+                        step_size INTEGER NOT NULL
+                    )
+                    """
+                )
+
+                await conn.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS chunks (
                         chunk_id TEXT PRIMARY KEY,
                         doc_hash TEXT NOT NULL,
-                        parser TEXT NOT NULL,
+                        chunk_config_id TEXT NOT NULL,
                         order_index INTEGER NOT NULL,
                         text TEXT NOT NULL,
                         token_count INTEGER NOT NULL,
-                        FOREIGN KEY(doc_hash) REFERENCES documents(doc_hash) ON DELETE CASCADE
+                        FOREIGN KEY(doc_hash) REFERENCES documents(doc_hash) ON DELETE CASCADE,
+                        FOREIGN KEY(chunk_config_id) REFERENCES chunking_configs(config_id) ON DELETE RESTRICT
                     )
                     """
                 )
@@ -158,9 +178,35 @@ class DocumentStore:
                 await conn.execute("CREATE INDEX IF NOT EXISTS idx_docs_status ON documents(status)")
                 await conn.execute("CREATE INDEX IF NOT EXISTS idx_ext_doc ON extractions(doc_hash)")
                 await conn.execute("CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(doc_hash)")
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_chunks_config ON chunks(chunk_config_id)")
                 await conn.execute("CREATE INDEX IF NOT EXISTS idx_emb_doc ON embeddings(doc_hash)")
                 await conn.execute("CREATE INDEX IF NOT EXISTS idx_perf_doc ON performance_metrics(doc_hash)")
                 await conn.execute("CREATE INDEX IF NOT EXISTS idx_conv_msgs_conv ON conversation_messages(conversation_id, id)")
+
+                if self._chunking_configs:
+                    for spec in self._chunking_configs:
+                        await conn.execute(
+                            """
+                            INSERT INTO chunking_configs (config_id, label, description, core_size, left_overlap, right_overlap, step_size)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                            ON CONFLICT(config_id) DO UPDATE SET
+                                label=excluded.label,
+                                description=excluded.description,
+                                core_size=excluded.core_size,
+                                left_overlap=excluded.left_overlap,
+                                right_overlap=excluded.right_overlap,
+                                step_size=excluded.step_size
+                            """,
+                            (
+                                spec.config_id,
+                                spec.label,
+                                spec.description,
+                                spec.core_size,
+                                spec.left_overlap,
+                                spec.right_overlap,
+                                spec.step_size,
+                            ),
+                        )
 
                 await conn.commit()
             finally:
@@ -359,37 +405,53 @@ class DocumentStore:
             await conn.close()
 
     # Chunks
-    async def replace_chunks(self, doc_hash: str, parser: str, items: Sequence[Tuple[str, int, str, int]]) -> None:
-        """Replace chunk rows for a document and parser.
+    async def replace_chunks(
+        self,
+        doc_hash: str,
+        chunk_config_id: str,
+        items: Sequence[Tuple[str, int, str, int]],
+    ) -> None:
+        """Replace chunk rows for a document and chunking configuration.
 
         items: iterable of (chunk_id, order_index, text, token_count)
         """
         conn = await self._conn()
         try:
-            await conn.execute("DELETE FROM chunks WHERE doc_hash=? AND parser=?", (doc_hash, parser))
+            await conn.execute(
+                "DELETE FROM chunks WHERE doc_hash=? AND chunk_config_id=?",
+                (doc_hash, chunk_config_id),
+            )
             await conn.executemany(
-                "INSERT INTO chunks (chunk_id, doc_hash, parser, order_index, text, token_count) VALUES (?, ?, ?, ?, ?, ?)",
-                [(cid, doc_hash, parser, idx, txt, tok) for (cid, idx, txt, tok) in items],
+                """
+                INSERT INTO chunks (chunk_id, doc_hash, chunk_config_id, order_index, text, token_count)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                [(cid, doc_hash, chunk_config_id, idx, txt, tok) for (cid, idx, txt, tok) in items],
             )
             await conn.commit()
         finally:
             await conn.close()
 
-    async def fetch_chunks(self, doc_hash: Optional[str] = None, parser: Optional[str] = None) -> List[Dict[str, Any]]:
+    async def fetch_chunks(
+        self,
+        doc_hash: Optional[str] = None,
+        chunk_config_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         conn = await self._conn()
         try:
-            if doc_hash and parser:
-                cur = await conn.execute(
-                    "SELECT * FROM chunks WHERE doc_hash=? AND parser=? ORDER BY order_index ASC",
-                    (doc_hash, parser),
-                )
-            elif doc_hash:
-                cur = await conn.execute(
-                    "SELECT * FROM chunks WHERE doc_hash=? ORDER BY order_index ASC",
-                    (doc_hash,),
-                )
-            else:
-                cur = await conn.execute("SELECT * FROM chunks ORDER BY doc_hash, order_index ASC")
+            base = "SELECT * FROM chunks"
+            conditions: List[str] = []
+            params: List[Any] = []
+            if doc_hash:
+                conditions.append("doc_hash=?")
+                params.append(doc_hash)
+            if chunk_config_id:
+                conditions.append("chunk_config_id=?")
+                params.append(chunk_config_id)
+            if conditions:
+                base += " WHERE " + " AND ".join(conditions)
+            base += " ORDER BY doc_hash, order_index ASC"
+            cur = await conn.execute(base, tuple(params))
             rows = await cur.fetchall()
             await cur.close()
             return [dict(r) for r in rows]
@@ -456,22 +518,22 @@ class DocumentStore:
         finally:
             await conn.close()
 
-    async def count_embeddings_by_parser(self, doc_hash: str) -> Dict[str, int]:
+    async def count_embeddings_by_config(self, doc_hash: str) -> Dict[str, int]:
         conn = await self._conn()
         try:
             cur = await conn.execute(
                 """
-                SELECT c.parser, COUNT(e.chunk_id) as total
+                SELECT c.chunk_config_id, COUNT(e.chunk_id) as total
                 FROM embeddings e
                 JOIN chunks c ON c.chunk_id = e.chunk_id
                 WHERE e.doc_hash=? AND c.doc_hash=?
-                GROUP BY c.parser
+                GROUP BY c.chunk_config_id
                 """,
                 (doc_hash, doc_hash),
             )
             rows = await cur.fetchall()
             await cur.close()
-            return {str(row["parser"]): int(row["total"]) for row in rows}
+            return {str(row["chunk_config_id"]): int(row["total"]) for row in rows}
         finally:
             await conn.close()
 

@@ -3,7 +3,18 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Set
+from typing import Set, Tuple
+
+
+@dataclass(frozen=True)
+class ChunkingConfigSpec:
+    config_id: str
+    label: str
+    description: str
+    core_size: int
+    left_overlap: int
+    right_overlap: int
+    step_size: int
 
 
 @dataclass(frozen=True)
@@ -28,7 +39,9 @@ class AppSettings:
     large_chunk_size: int
     large_chunk_left_overlap: int
     large_chunk_right_overlap: int
-    large_chunk_parser_key: str
+    chunk_config_small_id: str
+    chunk_config_large_id: str
+    chunking_configs: Tuple[ChunkingConfigSpec, ...]
     llm_base_url: str
     llm_api_key: str
     llm_model: str
@@ -64,10 +77,38 @@ def load_settings() -> AppSettings:
     llm_context_size = _int_env("LLM_CONTEXT_SIZE", "10000")
 
     ocr_parser_key = _str_env("OCR_PARSER_KEY", "mineru").lower()
+    chunk_size = _int_env("CHUNK_SIZE", "200")
+    chunk_overlap = _int_env("CHUNK_OVERLAP", "60")
     large_chunk_size = _int_env("LARGE_CHUNK_SIZE", "1600")
     large_chunk_left_overlap = _int_env("LARGE_CHUNK_LEFT_OVERLAP", "100")
     large_chunk_right_overlap = _int_env("LARGE_CHUNK_RIGHT_OVERLAP", "100")
     ocr_status_poll_interval = _float_env("OCR_STATUS_POLL_INTERVAL", "5")
+
+    small_chunk_config_id = _str_env("SMALL_CHUNK_CONFIG_ID", "chunk-small")
+    small_chunk_config_label = _str_env("SMALL_CHUNK_CONFIG_NAME", "Small window") or "Small window"
+    large_chunk_config_id = _str_env("LARGE_CHUNK_CONFIG_ID", "chunk-large")
+    large_chunk_config_label = _str_env("LARGE_CHUNK_CONFIG_NAME", "Large window") or "Large window"
+
+    chunking_configs: Tuple[ChunkingConfigSpec, ...] = (
+        ChunkingConfigSpec(
+            config_id=small_chunk_config_id,
+            label=small_chunk_config_label,
+            description="Primary retrieval window",
+            core_size=chunk_size,
+            left_overlap=chunk_overlap,
+            right_overlap=chunk_overlap,
+            step_size=chunk_size,
+        ),
+        ChunkingConfigSpec(
+            config_id=large_chunk_config_id,
+            label=large_chunk_config_label,
+            description="Secondary large context window",
+            core_size=large_chunk_size,
+            left_overlap=large_chunk_left_overlap,
+            right_overlap=large_chunk_right_overlap,
+            step_size=large_chunk_size,
+        ),
+    )
 
     return AppSettings(
         data_dir=data_dir,
@@ -92,12 +133,14 @@ def load_settings() -> AppSettings:
         ),
         completed_doc_statuses={s.strip().lower() for s in ("processed", "done", "completed", "ready")},
         frontend_origin=f"http://localhost:{os.environ.get('FRONTEND_PORT', '5173')}",
-        chunk_size=_int_env("CHUNK_SIZE", "200"),
-        chunk_overlap=_int_env("CHUNK_OVERLAP", "60"),
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
         large_chunk_size=large_chunk_size,
         large_chunk_left_overlap=large_chunk_left_overlap,
         large_chunk_right_overlap=large_chunk_right_overlap,
-        large_chunk_parser_key=f"{ocr_parser_key}:large",
+        chunk_config_small_id=small_chunk_config_id,
+        chunk_config_large_id=large_chunk_config_id,
+        chunking_configs=chunking_configs,
         llm_base_url=_str_env("LLM_BASE_URL"),
         llm_api_key=_str_env("LLM_API_KEY"),
         llm_model=_str_env("LLM_MODEL"),

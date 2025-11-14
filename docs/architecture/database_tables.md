@@ -36,10 +36,19 @@ erDiagram
     chunks {
         TEXT chunk_id PK
         TEXT doc_hash FK
-        TEXT parser
+        TEXT chunk_config_id FK
         INTEGER order_index
         TEXT text
         INTEGER token_count
+    }
+    chunking_configs {
+        TEXT config_id PK
+        TEXT label
+        TEXT description
+        INTEGER core_size
+        INTEGER left_overlap
+        INTEGER right_overlap
+        INTEGER step_size
     }
     embeddings {
         TEXT chunk_id PK,FK
@@ -75,6 +84,7 @@ erDiagram
     documents ||--o{ jobs : "doc_hash"
     documents ||--o{ extractions : "doc_hash"
     documents ||--o{ chunks : "doc_hash"
+    chunking_configs ||--o{ chunks : "chunk_config_id"
     documents ||--|| performance_metrics : "doc_hash"
     chunks ||--|| embeddings : "chunk_id"
     conversations ||--o{ conversation_messages : "conversation_id"
@@ -127,7 +137,7 @@ Stores parser-specific raw text and metadata produced during OCR/parsing.
 | Column | Type | Keys & constraints |
 | --- | --- | --- |
 | `doc_hash` | TEXT | Part of the composite primary key; foreign key to [`documents`](#documents). |
-| `parser` | TEXT | Part of the composite primary key; names the parser variant (e.g., `mineru`, `mineru:large`). |
+| `parser` | TEXT | Part of the composite primary key; names the parser variant (e.g., `mineru`). |
 | `text` | TEXT | Extracted document text. |
 | `meta` | TEXT | JSON metadata string (layout info, parser stats, etc.). |
 | `created_at` | TEXT | When this parser output was last refreshed. |
@@ -135,6 +145,22 @@ Stores parser-specific raw text and metadata produced during OCR/parsing.
 **Indexes**
 
 - `idx_ext_doc` supports quick lookups by `doc_hash`.
+
+### chunking_configs
+
+Defines the sliding-window presets used during chunking. Each config captures the window core size plus overlaps so downstream consumers can tell exactly how a chunk was produced.
+
+| Column | Type | Keys & constraints |
+| --- | --- | --- |
+| `config_id` | TEXT | Primary key (e.g., `chunk-small`). |
+| `label` | TEXT | Friendly name shown in diagnostics. |
+| `description` | TEXT | Optional human-readable summary. |
+| `core_size` | INTEGER | Number of tokens in the center window. |
+| `left_overlap` | INTEGER | Tokens included before the core window. |
+| `right_overlap` | INTEGER | Tokens included after the core window. |
+| `step_size` | INTEGER | Sliding-step in tokens for the next window. |
+
+The startup sequence syncs the configured presets (small + large) into this table so foreign keys can reference them.
 
 ### chunks
 
@@ -144,7 +170,7 @@ Holds ordered text snippets that feed embedding generation and retrieval.
 | --- | --- | --- |
 | `chunk_id` | TEXT | Primary key. |
 | `doc_hash` | TEXT | Foreign key to [`documents`](#documents). |
-| `parser` | TEXT | Parser profile used to produce the chunk. |
+| `chunk_config_id` | TEXT | Foreign key to [`chunking_configs`](#chunking_configs); identifies which window preset produced the row. |
 | `order_index` | INTEGER | Maintains the original layout order. |
 | `text` | TEXT | Chunk contents. |
 | `token_count` | INTEGER | Tokenized length (used for window sizing and metrics). |
@@ -152,6 +178,7 @@ Holds ordered text snippets that feed embedding generation and retrieval.
 **Indexes**
 
 - `idx_chunks_doc` speeds up chunk scans per document.
+- `idx_chunks_config` enables quick grouping/filtering by configuration.
 
 ### embeddings
 

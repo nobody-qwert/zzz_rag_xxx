@@ -57,9 +57,9 @@ async def debug_parsed_text(
         raise HTTPException(status_code=404, detail=f"No extraction found for parser '{parser_key}'")
     text = row["text"] or ""
     total_tokens = count_text_tokens(text)
-    embedding_counts = await document_store.count_embeddings_by_parser(doc_hash)
-    small_embeddings = int(embedding_counts.get(settings.ocr_parser_key, 0))
-    large_embeddings = int(embedding_counts.get(settings.large_chunk_parser_key, 0))
+    embedding_counts = await document_store.count_embeddings_by_config(doc_hash)
+    small_embeddings = int(embedding_counts.get(settings.chunk_config_small_id, 0))
+    large_embeddings = int(embedding_counts.get(settings.chunk_config_large_id, 0))
     total_embeddings = small_embeddings + large_embeddings
 
     return {

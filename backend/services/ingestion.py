@@ -266,8 +266,8 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
             raise RuntimeError(f"No OCR text extracted for document '{display_name}'")
         small_chunk_rows = [(c.chunk_id, c.order_index, c.text, c.token_count) for c in small_chunks]
         large_chunk_rows = [(c.chunk_id, c.order_index, c.text, c.token_count) for c in large_chunks]
-        await document_store.replace_chunks(doc_hash, settings.ocr_parser_key, small_chunk_rows)
-        await document_store.replace_chunks(doc_hash, settings.large_chunk_parser_key, large_chunk_rows)
+        await document_store.replace_chunks(doc_hash, settings.chunk_config_small_id, small_chunk_rows)
+        await document_store.replace_chunks(doc_hash, settings.chunk_config_large_id, large_chunk_rows)
         chunking_time = time.perf_counter() - start_chunking
         set_progress(
             "chunking",
