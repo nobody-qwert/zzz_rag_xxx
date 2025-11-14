@@ -4,6 +4,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
+import rehypeRaw from "rehype-raw";
 
 const ENV_CONTEXT_LIMIT = Number(import.meta.env.VITE_LLM_CONTEXT_SIZE || "10000") || 10000;
 const makeDefaultContextStats = () => ({ used: 0, limit: ENV_CONTEXT_LIMIT, truncated: false, ratio: 0 });
@@ -77,7 +78,7 @@ const styles = {
 };
 
 const markdownRemarkPlugins = [remarkGfm, remarkMath];
-const markdownRehypePlugins = [rehypeKatex];
+const markdownRehypePlugins = [rehypeRaw, rehypeKatex];
 const markdownComponents = {
   table: (props) => <table style={styles.markdownTable} {...props} />,
   th: (props) => <th style={styles.tableCell} {...props} />,
