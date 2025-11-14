@@ -10,7 +10,7 @@ const SECTION_LABELS = {
 };
 
 const PANEL_WIDTH = 420;
-const HANDLE_WIDTH = 36;
+const HANDLE_WIDTH = 20;
 
 function normalizeGroups(groups) {
   if (!groups || typeof groups !== "object") return [];
@@ -113,10 +113,11 @@ export default function DiagnosticsPanel({ open, onToggle, groups }) {
         onClick={toggle}
         style={{
           position: "absolute",
-          top: 40,
+          top: "50%",
+          transform: "translateY(-50%)",
           left: open ? PANEL_WIDTH : 0,
           width: HANDLE_WIDTH,
-          height: 110,
+          height: 80,
           borderRadius: "0 12px 12px 0",
           border: "1px solid rgba(99, 102, 241, 0.4)",
           background: "linear-gradient(180deg, rgba(99,102,241,0.95), rgba(79,70,229,0.9))",
