@@ -654,7 +654,7 @@ export default function IngestPage({ systemStatus = {} }) {
                 const jobProgress = jobInfo?.progress;
                 const showDocProgress = isInProgress && jobProgress && typeof jobProgress.percent === "number";
                 const docProgressPercent = clampPercent(jobProgress?.percent, 0);
-                const docProgressWidth = Math.max(5, docProgressPercent);
+                const docProgressWidth = docProgressPercent;
                 const docProgressLabel = formatProgressDetails(jobProgress) || statusLabel.toUpperCase();
                 
                 return (
