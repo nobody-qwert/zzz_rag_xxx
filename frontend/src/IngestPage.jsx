@@ -473,7 +473,7 @@ export default function IngestPage({ systemStatus = {} }) {
           {uploadProgress.length > 0 && (
             <div style={{ marginTop: 12, maxHeight: "200px", overflow: "auto" }}>
               {uploadProgress.map((p) => {
-                const uploadWidth = clampPercent(p.jobProgress?.percent, p.status === "queued" ? 5 : 0);
+                const uploadWidth = clampPercent(p.jobProgress?.percent, 0);
                 const uploadLabel = formatProgressDetails(p.jobProgress) || p.status;
                 return (
                   <div 
