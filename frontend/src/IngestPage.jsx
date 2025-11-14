@@ -736,10 +736,10 @@ export default function IngestPage({ systemStatus = {} }) {
                         {showPerf && isExpanded && (
                           <div style={styles.docPerfDetails}>
                             {perf.mineru_time_sec != null && (
-                              <div>• MinerU: {perf.mineru_time_sec.toFixed(2)}s</div>
+                              <div>• OCR: {perf.mineru_time_sec.toFixed(2)}s</div>
                             )}
                             {perf.mineru_time_sec == null && (
-                              <div style={{ opacity: 0.6 }}>• MinerU: unavailable</div>
+                              <div style={{ opacity: 0.6 }}>• OCR: unavailable</div>
                             )}
                             {perf.chunking_time_sec != null && (
                               <div>• Chunking: {perf.chunking_time_sec.toFixed(2)}s</div>
