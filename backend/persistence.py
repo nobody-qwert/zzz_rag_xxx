@@ -119,7 +119,7 @@ class DocumentStore:
                     """
                     CREATE TABLE IF NOT EXISTS performance_metrics (
                         doc_hash TEXT PRIMARY KEY,
-                        mineru_time_sec REAL,
+                        ocr_time_sec REAL,
                         chunking_time_sec REAL,
                         embedding_time_sec REAL,
                         total_time_sec REAL,
@@ -480,7 +480,7 @@ class DocumentStore:
         self,
         doc_hash: str,
         *,
-        mineru_time_sec: Optional[float] = None,
+        ocr_time_sec: Optional[float] = None,
         chunking_time_sec: Optional[float] = None,
         embedding_time_sec: Optional[float] = None,
         total_time_sec: Optional[float] = None,
@@ -490,12 +490,12 @@ class DocumentStore:
             await conn.execute(
                 """
                 INSERT INTO performance_metrics (
-                    doc_hash, mineru_time_sec, chunking_time_sec,
+                    doc_hash, ocr_time_sec, chunking_time_sec,
                     embedding_time_sec, total_time_sec, created_at
                 )
                 VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(doc_hash) DO UPDATE SET
-                    mineru_time_sec=excluded.mineru_time_sec,
+                    ocr_time_sec=excluded.ocr_time_sec,
                     chunking_time_sec=excluded.chunking_time_sec,
                     embedding_time_sec=excluded.embedding_time_sec,
                     total_time_sec=excluded.total_time_sec,
@@ -503,7 +503,7 @@ class DocumentStore:
                 """,
                 (
                     doc_hash,
-                    mineru_time_sec,
+                    ocr_time_sec,
                     chunking_time_sec,
                     embedding_time_sec,
                     total_time_sec,

@@ -697,10 +697,10 @@ export default function IngestPage({ systemStatus = {} }) {
 
                         {showPerf && isExpanded && (
                           <div style={styles.docPerfDetails}>
-                            {perf.mineru_time_sec != null && (
-                              <div>• OCR: {perf.mineru_time_sec.toFixed(2)}s</div>
+                            {perf.ocr_time_sec != null && (
+                              <div>• OCR: {perf.ocr_time_sec.toFixed(2)}s</div>
                             )}
-                            {perf.mineru_time_sec == null && (
+                            {perf.ocr_time_sec == null && (
                               <div style={{ opacity: 0.6 }}>• OCR: unavailable</div>
                             )}
                             {perf.chunking_time_sec != null && (

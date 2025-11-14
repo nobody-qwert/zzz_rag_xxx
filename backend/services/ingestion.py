@@ -155,7 +155,7 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
         jobs_registry[job_id]["progress"] = payload
 
     start_total = time.perf_counter()
-    mineru_time = None
+    ocr_time = None
     chunking_time = None
     embedding_time = None
 
@@ -164,7 +164,7 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
         await document_store.update_document_status(doc_hash, "processing")
         set_progress("ocr", 0.0, stage="starting")
 
-        start_mineru = time.perf_counter()
+        start_ocr = time.perf_counter()
 
         def ocr_progress_callback(data: Dict[str, Any]) -> None:
             if not data:
@@ -181,9 +181,9 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
 
         try:
             ocr_result = await _call_ocr_module(doc_hash, doc_path, progress_cb=ocr_progress_callback)
-            mineru_time = time.perf_counter() - start_mineru
+            ocr_time = time.perf_counter() - start_ocr
         except Exception as exc:
-            mineru_time = None
+            ocr_time = None
             logger.error("OCR module failed for %s: %s", doc_path, exc)
             set_progress("ocr", 100.0, stage="failed", error=str(exc))
             raise
@@ -323,7 +323,7 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
         try:
             await document_store.save_performance_metrics(
                 doc_hash,
-                mineru_time_sec=mineru_time,
+                ocr_time_sec=ocr_time,
                 chunking_time_sec=chunking_time,
                 embedding_time_sec=embedding_time,
                 total_time_sec=total_time,
