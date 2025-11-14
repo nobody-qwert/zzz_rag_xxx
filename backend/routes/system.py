@@ -1,19 +1,63 @@
 from __future__ import annotations
 
+import os
+from typing import Any, Dict
+
 from fastapi import APIRouter
 
 try:
-    from ..dependencies import document_store, jobs_registry
+    from ..dependencies import document_store, jobs_registry, settings
     from .helpers import format_document_row
     from ..services.ingestion import warmup_mineru
     from ..services.rag import warmup_llm
 except ImportError:  # pragma: no cover
-    from dependencies import document_store, jobs_registry  # type: ignore
+    from dependencies import document_store, jobs_registry, settings  # type: ignore
     from routes.helpers import format_document_row  # type: ignore
     from services.ingestion import warmup_mineru  # type: ignore
     from services.rag import warmup_llm  # type: ignore
 
 router = APIRouter()
+
+
+def _settings_snapshot() -> Dict[str, Dict[str, Any]]:
+    env = os.environ
+    return {
+        "ocr": {
+            "parser_key": settings.ocr_parser_key,
+            "module_url": settings.ocr_module_url,
+            "timeout_sec": settings.ocr_module_timeout,
+            "status_poll_sec": settings.ocr_status_poll_interval,
+        },
+        "chunking": {
+            "chunk_size": settings.chunk_size,
+            "chunk_overlap": settings.chunk_overlap,
+            "large_chunk_size": settings.large_chunk_size,
+            "large_chunk_left_overlap": settings.large_chunk_left_overlap,
+            "large_chunk_right_overlap": settings.large_chunk_right_overlap,
+            "large_chunk_parser_key": settings.large_chunk_parser_key,
+        },
+        "embedding": {
+            "base_url": env.get("EMBEDDING_BASE_URL", ""),
+            "model": env.get("EMBEDDING_MODEL", ""),
+            "batch_size": env.get("EMBEDDING_BATCH_SIZE", "1"),
+            "context_size": env.get("EMBED_CONTEXT_SIZE", ""),
+        },
+        "llm": {
+            "base_url": settings.llm_base_url,
+            "model": settings.llm_model,
+            "context_window": settings.chat_context_window,
+            "max_completion_tokens": settings.chat_completion_max_tokens,
+            "reserve_tokens": settings.chat_completion_reserve,
+        },
+        "retrieval": {
+            "min_context_similarity": settings.min_context_similarity,
+        },
+        "storage": {
+            "data_dir": str(settings.data_dir),
+            "index_dir": str(settings.index_dir),
+            "doc_store": str(settings.doc_store_path),
+        },
+    }
 
 
 @router.get("/healthz")
@@ -58,6 +102,7 @@ async def system_status() -> dict:
         ],
         "documents": [format_document_row(doc) for doc in docs],
         "llm_ready": False,
+        "settings": _settings_snapshot(),
     }
 
 

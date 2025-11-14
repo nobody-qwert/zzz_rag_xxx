@@ -16,7 +16,19 @@ import ChatPage from "./ChatPage";
 function AppContent() {
   const location = useLocation();
   const navigate = useNavigate();
-  const [systemStatus, setSystemStatus] = useState({ ready: false, has_running_jobs: false, running_jobs: [], total_jobs: 0, asking: false, docs_count: 0, total_docs: 0, jobs: [], llm_ready: false, documents: [] });
+  const [systemStatus, setSystemStatus] = useState({
+    ready: false,
+    has_running_jobs: false,
+    running_jobs: [],
+    total_jobs: 0,
+    asking: false,
+    docs_count: 0,
+    total_docs: 0,
+    jobs: [],
+    llm_ready: false,
+    documents: [],
+    settings: null,
+  });
 
   const api = useMemo(() => ({ status: "/api/status", warmup: "/api/warmup" }), []);
 
@@ -35,10 +47,14 @@ function AppContent() {
 
         // jobs listing is optional; try and ignore errors
         let jobs = [];
+        let statusSettings = null;
         try {
           const r = await fetch("/api/status");
           const j = await readJsonSafe(r);
-          if (r.ok && j && Array.isArray(j.jobs)) jobs = j.jobs;
+          if (r.ok && j) {
+            if (Array.isArray(j.jobs)) jobs = j.jobs;
+            if (j.settings && typeof j.settings === "object") statusSettings = j.settings;
+          }
         } catch {}
 
         setSystemStatus(prev => ({
@@ -51,6 +67,7 @@ function AppContent() {
           total_docs: docsArr.length,
           jobs,
           documents: docsArr,
+          settings: statusSettings || prev.settings,
         }));
       } catch (e) {
         console.error("status error", e);

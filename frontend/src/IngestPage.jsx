@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import DiagnosticsPanel from "./components/DiagnosticsPanel";
 
 async function readJsonSafe(res) {
   const ct = (res.headers.get("content-type") || "").toLowerCase();
@@ -125,6 +126,7 @@ export default function IngestPage({ systemStatus = {} }) {
   const [previewMaxChars, setPreviewMaxChars] = useState(2000);
   const parser = FALLBACK_PARSER;
   const [expandedPerf, setExpandedPerf] = useState(new Set());
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const selectedDocRef = useRef(null);
   const lastPreviewParamsRef = useRef({ previewMaxChars });
 
@@ -152,6 +154,10 @@ export default function IngestPage({ systemStatus = {} }) {
   useEffect(() => { void refreshDocs(); }, [refreshDocs]);
 
   const systemDocs = useMemo(() => (Array.isArray(systemStatus.documents) ? systemStatus.documents : []), [systemStatus.documents]);
+  const settingsGroups = useMemo(
+    () => systemStatus.settings || systemStatus.settings_snapshot || null,
+    [systemStatus.settings, systemStatus.settings_snapshot],
+  );
   const displayDocs = docs.length ? docs : systemDocs;
   const jobInfoByHash = useMemo(() => {
     const map = new Map();
@@ -407,8 +413,12 @@ export default function IngestPage({ systemStatus = {} }) {
     navigate("/chat");
   }, [canOpenChat, navigate]);
 
+  const toggleDiagnostics = useCallback(() => setDiagnosticsOpen((prev) => !prev), []);
+
   return (
-    <div style={styles.page}>
+    <div style={{ position: "relative" }}>
+      <DiagnosticsPanel open={diagnosticsOpen} onToggle={toggleDiagnostics} groups={settingsGroups} />
+      <div style={styles.page}>
       <div style={styles.leftColumn}>
         <section style={styles.card}>
           <div style={styles.sectionHeader}>
@@ -749,5 +759,6 @@ export default function IngestPage({ systemStatus = {} }) {
         </div>
       </section>
     </div>
+  </div>
   );
 }
