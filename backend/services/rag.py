@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
+import numpy as np
 from fastapi import HTTPException
 
 try:
@@ -29,6 +31,9 @@ except ImportError:  # pragma: no cover
         trim_history_for_budget,
     )
     from utils.vectors import cosine_similarity  # type: ignore
+
+
+logger = logging.getLogger(__name__)
 
 
 async def ask_question(req: AskRequest) -> AskResponse:
@@ -73,6 +78,22 @@ async def ask_question(req: AskRequest) -> AskResponse:
     if distilled_vec is None:
         raise HTTPException(status_code=500, detail="Failed to embed query")
 
+    query_vec = distilled_vec
+    try:
+        hyde_text = await _generate_hyde_answer(question, history_summary)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.warning("HyDE generation raised an unexpected error: %s", exc)
+        hyde_text = None
+
+    if hyde_text:
+        hyde_vec = await _embed_query(hyde_text, emb_client)
+        if hyde_vec is not None:
+            try:
+                query_vec = (np.asarray(distilled_vec, dtype=np.float32) + np.asarray(hyde_vec, dtype=np.float32)) / 2.0
+            except Exception as exc:  # pragma: no cover - fallback
+                logger.warning("HyDE vector blend failed: %s", exc)
+                query_vec = distilled_vec
+
     parser_specs: List[Dict[str, str]] = [
         {"config_id": settings.chunk_config_small_id, "scale": "small"}
     ]
@@ -110,7 +131,7 @@ async def ask_question(req: AskRequest) -> AskResponse:
         row = emb_by_id.get(chunk["chunk_id"])  # type: ignore[arg-type]
         if not row:
             continue
-        score = cosine_similarity(row.vector, distilled_vec)
+        score = cosine_similarity(row.vector, query_vec)
         scored.append({"chunk": chunk, "score": score})
     scored.sort(key=lambda entry: entry["score"], reverse=True)
 
@@ -309,3 +330,51 @@ async def _embed_query(text: str, client: EmbeddingClient) -> Any:
 
 def _estimate_prompt_tokens(messages: List[Dict[str, str]]) -> int:
     return estimate_messages_tokens(messages, model=settings.llm_model)
+
+
+async def _generate_hyde_answer(question: str, history_summary: str) -> Optional[str]:
+    """Produce a hypothetical ideal answer used for HyDE-style retrieval."""
+    question_clean = (question or "").strip()
+    if not question_clean:
+        return None
+    if not settings.llm_base_url or not settings.llm_api_key or not settings.llm_model:
+        return None
+    try:
+        from openai import AsyncOpenAI  # type: ignore
+    except ImportError:  # pragma: no cover - optional dependency
+        return None
+
+    prompt_header = (
+        "You draft concise, factual answers solely to improve document retrieval. "
+        "Rely only on broad world knowledge and avoid speculation."
+    )
+    summary_text = history_summary.strip() if history_summary else "(no prior conversation)"
+    user_prompt = (
+        f"Conversation summary: {summary_text}\n"
+        f"Question: {question_clean}\n"
+        "Provide a single, information-dense paragraph that would ideally answer the question."
+    )
+    max_tokens = max(64, min(256, settings.chat_completion_max_tokens))
+
+    client = AsyncOpenAI(base_url=settings.llm_base_url, api_key=settings.llm_api_key)
+    try:
+        response = await client.chat.completions.create(
+            model=settings.llm_model,
+            messages=[
+                {"role": "system", "content": prompt_header},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.2,
+            max_tokens=max_tokens,
+            stream=False,
+        )
+    except Exception as exc:  # pragma: no cover - passthrough logging
+        logger.debug("HyDE LLM call failed: %s", exc)
+        return None
+
+    if not response or not getattr(response, "choices", None):
+        return None
+    choice = response.choices[0]
+    content = getattr(choice, "message", None)
+    answer_text = (getattr(content, "content", "") or "").strip()
+    return answer_text or None
