@@ -52,7 +52,18 @@ const styles = {
   sourceItem: { marginBottom: 6, paddingBottom: 6, borderBottom: "1px solid rgba(148, 163, 184, 0.08)" },
   sourceHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" },
   sourceToggle: { font: "inherit", fontSize: 11, padding: "6px 16px", borderRadius: 999, border: "none", background: "rgba(65, 77, 128, 0.96)", color: "#ffffff", cursor: "pointer", boxShadow: "0 14px 24px rgba(3, 6, 18, 0.55)" },
-  sourcePreview: { fontSize: 11, color: "#ffffff", fontStyle: "italic", marginTop: 4, whiteSpace: "pre-wrap" },
+  sourcePreview: {
+    fontSize: 13,
+    color: "#f8fbff",
+    marginTop: 8,
+    padding: "12px 14px",
+    borderRadius: 16,
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "rgba(15, 23, 42, 0.55)",
+    lineHeight: 1.55,
+    whiteSpace: "normal",
+    wordBreak: "break-word",
+  },
   markdown: { fontSize: 14, lineHeight: 1.65, color: "#fbfcff", whiteSpace: "normal", wordBreak: "break-word" },
   markdownTable: { width: "100%", borderCollapse: "collapse", margin: "12px 0" },
   tableCell: { border: "1px solid rgba(148, 163, 184, 0.18)", padding: "8px 10px", textAlign: "left" },
@@ -307,6 +318,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
                           const chunkText = fullChunkText || fallbackPreview;
                           const hasChunkText = chunkText.length > 0;
                           const previewOnly = !fullChunkText && !!fallbackPreview;
+                          const chunkDisplayText = previewOnly ? `${chunkText}...` : chunkText;
                           return (
                             <li key={sourceKey} style={styles.sourceItem}>
                               <div style={styles.sourceHeader}>
@@ -331,7 +343,13 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
                               </div>
                               {isExpanded && hasChunkText && (
                                 <div style={styles.sourcePreview}>
-                                  {previewOnly ? `"${chunkText}..."` : chunkText}
+                                  <ReactMarkdown
+                                    remarkPlugins={markdownRemarkPlugins}
+                                    rehypePlugins={markdownRehypePlugins}
+                                    components={markdownComponents}
+                                  >
+                                    {chunkDisplayText}
+                                  </ReactMarkdown>
                                 </div>
                               )}
                             </li>
