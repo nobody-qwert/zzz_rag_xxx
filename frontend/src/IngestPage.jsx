@@ -1,5 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import rehypeRaw from "rehype-raw";
 import DiagnosticsPanel from "./components/DiagnosticsPanel";
 
 async function readJsonSafe(res) {
@@ -93,6 +98,52 @@ const styles = {
   miniProgressTrack: { flex: 1, height: 6, borderRadius: 999, background: "rgba(255, 255, 255, 0.12)", overflow: "hidden" },
   miniProgressFill: { height: "100%", background: "linear-gradient(90deg, rgba(167,139,250,0.95), rgba(59,130,246,0.85))", transition: "width 0.4s ease" },
   miniProgressLabel: { fontSize: 11, color: "rgba(226, 232, 240, 0.8)", minWidth: 46, textAlign: "right" },
+  previewText: {
+    border: "none",
+    borderRadius: 22,
+    background: "rgba(23, 28, 60, 0.97)",
+    padding: 18,
+    maxHeight: "40vh",
+    overflow: "auto",
+    boxShadow: "0 22px 38px rgba(0, 0, 0, 0.5), inset 0 0 0 2px rgba(99, 102, 241, 0.14)",
+  },
+  markdown: { fontSize: 14, lineHeight: 1.6, color: "#f8fbff", whiteSpace: "normal", wordBreak: "break-word" },
+  markdownTable: { width: "100%", borderCollapse: "collapse", margin: "12px 0" },
+  tableCell: { border: "1px solid rgba(148, 163, 184, 0.18)", padding: "8px 10px", textAlign: "left" },
+  inlineCode: {
+    background: "rgba(15, 23, 42, 0.6)",
+    borderRadius: 8,
+    padding: "2px 6px",
+    fontSize: 13,
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+  },
+  codeBlock: {
+    background: "rgba(15, 23, 42, 0.75)",
+    borderRadius: 16,
+    padding: "14px 16px",
+    margin: "12px 0",
+    overflowX: "auto",
+    fontSize: 13,
+    border: "1px solid rgba(148, 163, 184, 0.25)",
+  },
+};
+
+const markdownRemarkPlugins = [remarkGfm, remarkMath];
+const markdownRehypePlugins = [rehypeRaw, rehypeKatex];
+const markdownComponents = {
+  table: (props) => <table style={styles.markdownTable} {...props} />,
+  th: (props) => <th style={styles.tableCell} {...props} />,
+  td: (props) => <td style={styles.tableCell} {...props} />,
+  code: ({ inline, children = [], ...props }) =>
+    inline ? (
+      <code style={styles.inlineCode} {...props}>
+        {children}
+      </code>
+    ) : (
+      <pre style={styles.codeBlock}>
+        <code {...props}>{String(children).replace(/\n$/, "")}</code>
+      </pre>
+    ),
 };
 
 const FALLBACK_PARSER = "mineru";
@@ -554,8 +605,22 @@ export default function IngestPage({ systemStatus = {} }) {
               {/* Text Preview Section */}
               <div>
                 <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(148, 163, 184, 0.9)", marginBottom: 6 }}>Extracted Text</div>
-                <div style={{ border: "none", borderRadius: 22, background: "rgba(23, 28, 60, 0.97)", padding: 18, maxHeight: "40vh", overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word", overflowWrap: "anywhere", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace", fontSize: 13, lineHeight: 1.5, boxShadow: "0 22px 38px rgba(0, 0, 0, 0.5), inset 0 0 0 2px rgba(99, 102, 241, 0.14)" }}>
-                  {preview || (previewLoading ? "Loading…" : "No text extracted.")}
+                <div style={{ ...styles.previewText, wordBreak: "break-word", overflowWrap: "anywhere" }}>
+                  {previewLoading ? (
+                    <span style={styles.muted}>Loading…</span>
+                  ) : (preview || "").trim().length > 0 ? (
+                    <div style={styles.markdown}>
+                      <ReactMarkdown
+                        remarkPlugins={markdownRemarkPlugins}
+                        rehypePlugins={markdownRehypePlugins}
+                        components={markdownComponents}
+                      >
+                        {preview}
+                      </ReactMarkdown>
+                    </div>
+                  ) : (
+                    <span style={styles.muted}>No text extracted.</span>
+                  )}
                 </div>
                 {previewInfo && (
                   <div style={{ ...styles.muted, marginTop: 8, fontSize: 12 }}>
