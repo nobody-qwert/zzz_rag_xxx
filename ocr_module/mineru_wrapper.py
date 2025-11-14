@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
+
+import fitz  # type: ignore
 
 
 @dataclass
@@ -33,13 +36,14 @@ def run_mineru(
     lang: str | None = None,
     table_enable: bool | None = None,
     formula_enable: bool | None = None,
+    progress_cb: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> MineruResult:
     """Run MinerU on a single PDF with GPU detection and return Markdown text.
 
     This follows the pattern proven to work in ocr_bench.
     """
     try:
-        from mineru.cli.common import do_parse, read_fn  # type: ignore
+        from mineru.cli.common import do_parse  # type: ignore
     except Exception as exc:  # pragma: no cover - runtime dependency
         raise RuntimeError("mineru is not installed: pip install mineru") from exc
 
@@ -68,7 +72,6 @@ def run_mineru(
 
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    pdf_bytes = read_fn(pdf_path)
     pdf_name = pdf_path.stem
 
     # Defaults can be overridden by env or function args
@@ -77,33 +80,79 @@ def run_mineru(
     p_table = table_enable if table_enable is not None else _env_bool("MINERU_TABLE_ENABLE", True)
     p_formula = formula_enable if formula_enable is not None else _env_bool("MINERU_FORMULA_ENABLE", True)
 
-    do_parse(
-        output_dir=str(out_dir),
-        pdf_file_names=[pdf_name],
-        pdf_bytes_list=[pdf_bytes],
-        p_lang_list=[p_lang],
-        backend="pipeline",
-        parse_method=p_method,
-        formula_enable=p_formula,
-        table_enable=p_table,
-        start_page_id=0,
-        end_page_id=None,
-        f_draw_layout_bbox=False,
-        f_draw_span_bbox=False,
-        f_dump_md=True,
-        f_dump_middle_json=False,
-        f_dump_model_output=False,
-        f_dump_orig_pdf=False,
-        f_dump_content_list=False,
-        device_mode=effective,
-    )
+    doc = fitz.open(pdf_path)
+    total_pages = len(doc)
+    if total_pages == 0:
+        raise RuntimeError("PDF contains no pages")
 
-    # Output directory structure mirrors parse_method used by MinerU
-    md_path = out_dir / pdf_name / p_method / f"{pdf_name}.md"
-    if not md_path.exists():
-        raise RuntimeError(f"MinerU did not produce expected Markdown at {md_path}")
+    chunk_pages = max(1, int(os.environ.get("MINERU_PROGRESS_CHUNK_PAGES", "4")))
+    chunk_root = out_dir / "_chunks"
+    chunk_root.mkdir(parents=True, exist_ok=True)
+    combined_parts = []
 
-    text = md_path.read_text(encoding="utf-8")
+    def emit(stage: str, processed: int) -> None:
+        if not progress_cb:
+            return
+        total = total_pages
+        percent = max(0.0, min(100.0, (processed / total) * 100.0))
+        progress_cb({
+            "stage": stage,
+            "percent": percent,
+            "current": processed,
+            "total": total,
+        })
+
+    emit("parsing", 0)
+
+    for chunk_index, start in enumerate(range(0, total_pages, chunk_pages)):
+        end = min(total_pages, start + chunk_pages)
+        chunk_doc = fitz.open()
+        chunk_doc.insert_pdf(doc, from_page=start, to_page=end - 1)
+        chunk_bytes = chunk_doc.tobytes()
+        chunk_doc.close()
+
+        chunk_name = f"{pdf_name}_part_{chunk_index + 1}"
+        chunk_dir = chunk_root / chunk_name
+        chunk_dir.mkdir(parents=True, exist_ok=True)
+
+        do_parse(
+            output_dir=str(chunk_dir),
+            pdf_file_names=[chunk_name],
+            pdf_bytes_list=[chunk_bytes],
+            p_lang_list=[p_lang],
+            backend="pipeline",
+            parse_method=p_method,
+            formula_enable=p_formula,
+            table_enable=p_table,
+            start_page_id=0,
+            end_page_id=None,
+            f_draw_layout_bbox=False,
+            f_draw_span_bbox=False,
+            f_dump_md=True,
+            f_dump_middle_json=False,
+            f_dump_model_output=False,
+            f_dump_orig_pdf=False,
+            f_dump_content_list=False,
+            device_mode=effective,
+        )
+
+        chunk_md_path = chunk_dir / chunk_name / p_method / f"{chunk_name}.md"
+        if not chunk_md_path.exists():
+            raise RuntimeError(f"MinerU did not produce expected Markdown at {chunk_md_path}")
+        combined_parts.append(chunk_md_path.read_text(encoding="utf-8"))
+        emit("parsing", end)
+        shutil.rmtree(chunk_dir, ignore_errors=True)
+
+    doc.close()
+
+    final_dir = out_dir / pdf_name / p_method
+    final_dir.mkdir(parents=True, exist_ok=True)
+    md_path = final_dir / f"{pdf_name}.md"
+    text = "\n\n".join(part.strip() for part in combined_parts if part.strip())
+    if not text:
+        raise RuntimeError("MinerU produced no text output")
+    md_path.write_text(text, encoding="utf-8")
+    shutil.rmtree(chunk_root, ignore_errors=True)
     meta = {
         "markdown_path": str(md_path),
         "device_mode": effective,
@@ -112,6 +161,9 @@ def run_mineru(
         "lang": p_lang,
         "table_enable": p_table,
         "formula_enable": p_formula,
+        "pages": total_pages,
+        "chunk_pages": chunk_pages,
+        "chunks": len(combined_parts),
     }
 
     # Write a small summary for debugging

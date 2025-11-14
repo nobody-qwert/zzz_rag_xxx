@@ -1,5 +1,4 @@
 import asyncio
-import contextlib
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -101,28 +100,6 @@ class OCRJob:
 
 
 jobs: Dict[str, OCRJob] = {}
-
-
-async def _progress_pump(
-    job: OCRJob,
-    task: asyncio.Task,
-    *,
-    stage: str,
-    start: float = 10.0,
-    end: float = 90.0,
-    interval: float = 5.0,
-) -> None:
-    percent = start
-    job.update_progress(stage, percent)
-    try:
-        while not task.done():
-            await asyncio.sleep(interval)
-            if task.done():
-                break
-            percent = min(end, percent + max(1.0, (end - start) * 0.05))
-            job.update_progress(stage, percent)
-    except asyncio.CancelledError:  # pragma: no cover - cooperative cancellation
-        pass
 
 
 class ParseResponse(BaseModel):
@@ -247,6 +224,19 @@ async def _process_job(job: OCRJob, out_dir: Path) -> None:
         job.set_status("running")
         job.started_at = _utc_now()
         job.update_progress("initializing", 5.0)
+        def progress_hook(data: Dict[str, Any]) -> None:
+            if not data:
+                return
+            stage = str(data.get("stage") or "parsing")
+            percent = data.get("percent")
+            current = data.get("current")
+            total = data.get("total")
+            try:
+                percent_val = float(percent) if percent is not None else job.progress.get("percent", 10.0)
+            except (TypeError, ValueError):
+                percent_val = job.progress.get("percent", 10.0)
+            job.update_progress(stage, percent_val, current=current, total=total)
+
         parse_task = asyncio.create_task(
             asyncio.to_thread(
                 run_mineru,
@@ -256,15 +246,10 @@ async def _process_job(job: OCRJob, out_dir: Path) -> None:
                 lang=job.lang,
                 table_enable=job.table_enable,
                 formula_enable=job.formula_enable,
+                progress_cb=progress_hook,
             )
         )
-        pump_task = asyncio.create_task(_progress_pump(job, parse_task, stage="parsing", start=10.0, end=90.0))
-        try:
-            result = await parse_task
-        finally:
-            pump_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await pump_task
+        result = await parse_task
 
         job.text = result.text
         job.metadata = result.metadata
