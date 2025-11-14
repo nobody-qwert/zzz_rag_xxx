@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import md5
-from typing import Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 
 @dataclass
@@ -69,13 +69,22 @@ def _materialize_span(
     return _decode(enc, token_ids[start:end])
 
 
-def _chunks_for_spec(enc, token_ids: Sequence[int], text: str, spec: ChunkWindowSpec) -> List[Chunk]:
+def _chunks_for_spec(
+    enc,
+    token_ids: Sequence[int],
+    text: str,
+    spec: ChunkWindowSpec,
+    progress_cb: Optional[Callable[[Dict[str, Any]], None]] = None,
+) -> List[Chunk]:
     total_tokens = len(token_ids)
     if total_tokens == 0 or spec.core_size <= 0:
         return []
 
     out: List[Chunk] = []
     step = spec.step()
+
+    if progress_cb:
+        progress_cb({"stage": "starting", "percent": 0.0, "chunk_count": 0, "total_tokens": total_tokens})
 
     for core_start in range(0, total_tokens, step):
         core_end = min(total_tokens, core_start + spec.core_size)
@@ -103,20 +112,58 @@ def _chunks_for_spec(enc, token_ids: Sequence[int], text: str, spec: ChunkWindow
             )
         )
 
+        if progress_cb:
+            percent = 100.0 if total_tokens == 0 else (core_end / total_tokens) * 100.0
+            progress_cb(
+                {
+                    "stage": "processing",
+                    "percent": percent,
+                    "chunk_count": len(out),
+                    "token_end": core_end,
+                    "total_tokens": total_tokens,
+                }
+            )
+
         if core_end == total_tokens:
             break
+
+    if progress_cb:
+        progress_cb({"stage": "completed", "percent": 100.0, "chunk_count": len(out), "total_tokens": total_tokens})
 
     return out
 
 
-def chunk_text_multi(text: str, specs: Sequence[ChunkWindowSpec]) -> Dict[str, List[Chunk]]:
+def chunk_text_multi(
+    text: str,
+    specs: Sequence[ChunkWindowSpec],
+    *,
+    progress_cb: Optional[Callable[[Dict[str, Any]], None]] = None,
+) -> Dict[str, List[Chunk]]:
     """Return chunk lists for each spec using a shared tokenization."""
     enc = _tokenizer()
     token_ids = _encode(enc, text)
+    spec_list = list(specs)
+    total_specs = max(1, len(spec_list))
     results: Dict[str, List[Chunk]] = {}
 
-    for spec in specs:
-        results[spec.name] = _chunks_for_spec(enc, token_ids, text, spec)
+    for index, spec in enumerate(spec_list, start=1):
+        cb: Optional[Callable[[Dict[str, Any]], None]] = None
+        if progress_cb:
+            def _emit(payload: Dict[str, Any], *, _spec=spec, _index=index) -> None:
+                enriched = {
+                    "spec": _spec.name,
+                    "spec_index": _index,
+                    "spec_total": total_specs,
+                }
+                enriched.update(payload)
+                progress_cb(enriched)
+
+            cb = _emit
+            _emit({"stage": "spec_start", "percent": 0.0})
+
+        results[spec.name] = _chunks_for_spec(enc, token_ids, text, spec, progress_cb=cb)
+
+        if cb:
+            cb({"stage": "spec_completed", "percent": 100.0, "chunk_count": len(results[spec.name])})
 
     return results
-

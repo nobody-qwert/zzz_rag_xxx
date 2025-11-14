@@ -131,7 +131,7 @@ async def _queue_job(source_path: Path, doc_hash: str, display_name: str) -> str
         "status": "queued",
         "file": display_name,
         "hash": doc_hash,
-        "progress": {"stage": "queued", "percent": 0.0},
+        "progress": {"phase": "queued", "stage": "queued", "percent": 0.0},
     }
     await document_store.create_job(job_id, doc_hash)
     asyncio.create_task(_process_job(job_id, source_path, doc_hash, display_name))
@@ -143,9 +143,10 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
         jobs_registry[job_id]["status"] = status if not error else f"error: {error}"
         await document_store.update_document_status(doc_hash, status if not error else "error", error=error)
 
-    def set_progress(stage: str, percent: float, **extra: Any) -> None:
+    def set_progress(phase: str, percent: float, *, stage: Optional[str] = None, **extra: Any) -> None:
         payload = {
-            "stage": stage,
+            "phase": phase,
+            "stage": stage or phase,
             "percent": max(0.0, min(100.0, float(percent))),
         }
         for key, value in extra.items():
@@ -162,12 +163,17 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
     try:
         await document_store.mark_job_started(job_id)
         await document_store.update_document_status(doc_hash, "processing")
-        set_progress("preparing", 5.0)
+        set_progress("prepare", 0.0, stage="starting")
 
         start_pymupdf = time.perf_counter()
         py_out = await _extract_pymupdf(doc_path)
         pymupdf_time = time.perf_counter() - start_pymupdf
-        set_progress("extract:pymupdf", 15.0)
+        set_progress(
+            "prepare",
+            100.0,
+            stage="pymupdf_extract",
+            pages=py_out.get("pages", 0),
+        )
         await document_store.upsert_extraction(
             doc_hash,
             "pymupdf",
@@ -187,7 +193,7 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
 
         if run_ocr:
             start_mineru = time.perf_counter()
-            set_progress("ocr:queued", 25.0)
+            set_progress("ocr", 0.0, stage="queued")
 
             def ocr_progress_callback(data: Dict[str, Any]) -> None:
                 if not data:
@@ -197,15 +203,15 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
                 current = data.get("current")
                 total = data.get("total")
                 try:
-                    percent_val = float(percent) if percent is not None else jobs_registry.get(job_id, {}).get("progress", {}).get("percent", 30.0)
+                    percent_val = float(percent) if percent is not None else jobs_registry.get(job_id, {}).get("progress", {}).get("percent", 0.0)
                 except (TypeError, ValueError):
-                    percent_val = jobs_registry.get(job_id, {}).get("progress", {}).get("percent", 30.0)
-                set_progress(f"ocr:{stage}", min(90.0, percent_val), current=current, total=total)
+                    percent_val = jobs_registry.get(job_id, {}).get("progress", {}).get("percent", 0.0)
+                set_progress("ocr", percent_val, stage=stage, current=current, total=total)
 
             try:
                 ocr_result = await _call_ocr_module(doc_hash, doc_path, progress_cb=ocr_progress_callback)
                 mineru_time = time.perf_counter() - start_mineru
-                set_progress("ocr:completed", 70.0)
+                set_progress("ocr", 100.0, stage="completed")
                 ocr_text = ocr_result.get("text") or ""
                 ocr_meta = ocr_result.get("metadata") or {}
                 await document_store.upsert_extraction(
@@ -225,6 +231,7 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
             except Exception as exc:
                 mineru_time = None
                 logger.warning("OCR module failed for %s: %s — falling back to PyMuPDF text", doc_path, exc)
+                set_progress("ocr", 100.0, stage="failed", error=str(exc))
                 fallback_meta = {
                     "parser_used": "pymupdf",
                     "reason": f"ocr_module_failed: {exc}",
@@ -240,6 +247,7 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
         else:
             skip_reason = "non_pdf" if not ocr_allowed else "pymupdf_only"
             chosen_meta = {"parser_used": "pymupdf", "reason": skip_reason}
+            set_progress("ocr", 100.0, stage="skipped", reason=skip_reason)
             await document_store.upsert_extraction(
                 doc_hash,
                 settings.ocr_parser_key,
@@ -264,7 +272,46 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
                 step_size=settings.large_chunk_size,
             ),
         ]
-        chunk_views = chunk_text_multi(chosen_text, chunk_specs)
+        def chunk_progress_callback(data: Dict[str, Any]) -> None:
+            if not data:
+                return
+            spec_name_raw = data.get("spec")
+            spec_stage_raw = data.get("stage")
+            spec_name = str(spec_name_raw).strip() if spec_name_raw else "chunk"
+            spec_stage = str(spec_stage_raw).strip() if isinstance(spec_stage_raw, str) else ""
+            if not spec_stage:
+                spec_stage = "processing"
+            try:
+                spec_percent = float(data.get("percent") or 0.0)
+            except (TypeError, ValueError):
+                spec_percent = 0.0
+            try:
+                spec_index = int(data.get("spec_index") or 1)
+            except (TypeError, ValueError):
+                spec_index = 1
+            try:
+                spec_total = int(data.get("spec_total") or 1)
+            except (TypeError, ValueError):
+                spec_total = 1
+            spec_index = max(1, spec_index)
+            spec_total = max(1, spec_total)
+            spec_fraction = max(0.0, min(1.0, spec_percent / 100.0))
+            overall_fraction = ((spec_index - 1) + spec_fraction) / spec_total
+            overall_percent = max(0.0, min(100.0, overall_fraction * 100.0))
+            stage_label = f"{spec_name}:{spec_stage}" if spec_stage else spec_name
+            set_progress(
+                "chunking",
+                overall_percent,
+                stage=stage_label,
+                spec=spec_name,
+                spec_index=spec_index,
+                spec_total=spec_total,
+                spec_percent=spec_percent,
+                chunk_count=data.get("chunk_count"),
+            )
+
+        set_progress("chunking", 0.0, stage="starting")
+        chunk_views = chunk_text_multi(chosen_text, chunk_specs, progress_cb=chunk_progress_callback)
         small_chunks = chunk_views.get("small", [])
         large_chunks = chunk_views.get("large", [])
         if not small_chunks:
@@ -282,10 +329,35 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
         await document_store.replace_chunks(doc_hash, settings.ocr_parser_key, small_chunk_rows)
         await document_store.replace_chunks(doc_hash, settings.large_chunk_parser_key, large_chunk_rows)
         chunking_time = time.perf_counter() - start_chunking
-        set_progress("chunking", 85.0)
+        set_progress(
+            "chunking",
+            100.0,
+            stage="completed",
+            small_chunks=len(small_chunks),
+            large_chunks=len(large_chunks),
+        )
 
         start_embedding = time.perf_counter()
+        set_progress("embedding", 0.0, stage="starting", chunks=len(small_chunk_rows))
         emb_client = EmbeddingClient()
+
+        def embedding_progress_callback(info: Dict[str, Any]) -> None:
+            if not info:
+                return
+            try:
+                percent_val = float(info.get("percent") or 0.0)
+            except (TypeError, ValueError):
+                percent_val = 0.0
+            processed = info.get("processed")
+            total = info.get("total")
+            set_progress(
+                "embedding",
+                percent_val,
+                stage="batch",
+                processed=processed,
+                total=total,
+            )
+
         rows = await _compute_embeddings_for_chunks(
             [
                 {"chunk_id": cid, "order_index": idx, "text": txt, "token_count": tok}
@@ -293,10 +365,11 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
             ],
             emb_client,
             doc_hash,
+            progress_cb=embedding_progress_callback,
         )
         await document_store.replace_embeddings(rows)
         embedding_time = time.perf_counter() - start_embedding
-        set_progress("embedding", 95.0)
+        set_progress("embedding", 100.0, stage="completed", embeddings=len(rows))
 
         total_time = time.perf_counter() - start_total
         try:
@@ -314,16 +387,17 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
         await document_store.mark_document_processed(doc_hash)
         await document_store.finish_job(job_id, "done")
         jobs_registry[job_id]["status"] = "done"
-        set_progress("completed", 100.0)
+        set_progress("completed", 100.0, stage="done")
     except asyncio.CancelledError:
         await document_store.finish_job(job_id, "cancelled", error="cancelled")
         await update("error", error="cancelled")
+        set_progress("error", 0.0, stage="cancelled")
         raise
     except Exception as exc:  # pragma: no cover - background task logging
         await document_store.finish_job(job_id, "error", error=str(exc))
         await update("error", error=str(exc))
         current_percent = jobs_registry.get(job_id, {}).get("progress", {}).get("percent", 0.0)
-        set_progress("error", current_percent, message=str(exc))
+        set_progress("error", current_percent, stage="failed", message=str(exc))
         logger.exception("Job %s failed: %s", job_id, exc)
 
 
@@ -446,25 +520,49 @@ async def _compute_embeddings_for_chunks(
     chunks: List[Dict[str, Any]],
     client: EmbeddingClient,
     doc_hash: str,
+    *,
+    progress_cb: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> List[EmbeddingRow]:
-    texts = [chunk["text"] for chunk in chunks]
-    vectors = await client.embed_batch(texts)
-    if len(vectors) != len(chunks):
-        raise RuntimeError("Embedding result size mismatch")
-    if client.dim is None:
-        raise RuntimeError("Embedding dimension is unknown after embedding call")
+    total = len(chunks)
+    if total == 0:
+        if progress_cb:
+            progress_cb({"percent": 100.0, "processed": 0, "total": 0})
+        return []
 
     rows: List[EmbeddingRow] = []
-    for chunk, vector in zip(chunks, vectors):
-        rows.append(
-            EmbeddingRow(
-                chunk_id=chunk["chunk_id"],
-                doc_hash=doc_hash,
-                dim=client.dim,
-                model=client.model,
-                vector=vector,
+    batch_size = getattr(client, "max_batch", 1) or 1
+
+    last_percent_reported = 0.0
+
+    for start in range(0, total, batch_size):
+        batch_chunks = chunks[start : start + batch_size]
+        texts = [chunk["text"] for chunk in batch_chunks]
+        vectors = await client.embed_batch(texts)
+        if len(vectors) != len(batch_chunks):
+            raise RuntimeError("Embedding result size mismatch")
+        if client.dim is None:
+            raise RuntimeError("Embedding dimension is unknown after embedding call")
+
+        for chunk, vector in zip(batch_chunks, vectors):
+            rows.append(
+                EmbeddingRow(
+                    chunk_id=chunk["chunk_id"],
+                    doc_hash=doc_hash,
+                    dim=client.dim,
+                    model=client.model,
+                    vector=vector,
+                )
             )
-        )
+
+        if progress_cb:
+            done = min(total, start + len(batch_chunks))
+            percent = 100.0 if total == 0 else (done / total) * 100.0
+            last_percent_reported = percent
+            progress_cb({"percent": percent, "processed": done, "total": total})
+
+    if progress_cb and last_percent_reported < 100.0:
+        progress_cb({"percent": 100.0, "processed": total, "total": total})
+
     return rows
 
 

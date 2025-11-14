@@ -21,6 +21,39 @@ function prettyBytes(n) {
 function shortHash(h) { return (h || "").slice(0, 8); }
 function formatDate(v) { try { const d = new Date(v); return isNaN(d) ? "" : d.toLocaleString(); } catch { return ""; } }
 
+function clampPercent(v, fallback = 0) {
+  const n = Number(v);
+  if (Number.isFinite(n)) {
+    return Math.min(100, Math.max(0, n));
+  }
+  return fallback;
+}
+
+function formatProgressDetails(progress) {
+  if (!progress) return "";
+  const phaseRaw = typeof progress.phase === "string" ? progress.phase : progress.stage;
+  const stageRaw = typeof progress.stage === "string" ? progress.stage : "";
+  const phase = (phaseRaw || "").replace(/[:_]/g, " ").trim();
+  const stage = (stageRaw || "").replace(/[:_]/g, " ").trim();
+  const percent = typeof progress.percent === "number" && !Number.isNaN(progress.percent)
+    ? `${Math.round(progress.percent)}%`
+    : "";
+  const parts = [];
+  if (phase) parts.push(phase.toUpperCase());
+  if (percent) parts.push(percent);
+  if (stage && stage.toLowerCase() !== phase.toLowerCase()) {
+    parts.push(`· ${stage}`);
+  }
+  const current = progress.current ?? progress.processed;
+  const total = progress.total ?? progress.total_items ?? progress.total_chunks;
+  if (typeof current === "number" && typeof total === "number" && total > 0) {
+    parts.push(`(${current}/${total})`);
+  } else if (typeof progress.chunk_count === "number") {
+    parts.push(`(${progress.chunk_count} chunk${progress.chunk_count === 1 ? "" : "s"})`);
+  }
+  return parts.join(" ").trim();
+}
+
 const styles = {
   page: { display: "flex", flexWrap: "wrap", gap: 18, alignItems: "flex-start" },
   leftColumn: { display: "grid", gap: 18, flex: "2 1 520px", minWidth: 0 },
@@ -439,10 +472,13 @@ export default function IngestPage({ systemStatus = {} }) {
           {/* Upload Progress */}
           {uploadProgress.length > 0 && (
             <div style={{ marginTop: 12, maxHeight: "200px", overflow: "auto" }}>
-              {uploadProgress.map((p) => (
-                <div 
-                  key={p.id} 
-                  style={{ 
+              {uploadProgress.map((p) => {
+                const uploadWidth = clampPercent(p.jobProgress?.percent, p.status === "queued" ? 5 : 0);
+                const uploadLabel = formatProgressDetails(p.jobProgress) || p.status;
+                return (
+                  <div 
+                    key={p.id} 
+                    style={{ 
                     fontSize: 12, 
                     padding: "8px 14px", 
                     marginBottom: 4, 
@@ -453,7 +489,7 @@ export default function IngestPage({ systemStatus = {} }) {
                     gap: 8,
                     boxShadow: "0 18px 30px rgba(4, 7, 20, 0.6)"
                   }}
-                >
+                    >
                   <span>
                     {p.status === "pending" && "⏸"}
                     {p.status === "uploading" && "⏳"}
@@ -469,14 +505,12 @@ export default function IngestPage({ systemStatus = {} }) {
                       <div
                         style={{
                           ...styles.miniProgressFill,
-                          width: `${Math.min(100, Math.max(0, p.jobProgress?.percent ?? (p.status === "queued" ? 5 : 0)))}%`,
+                          width: `${uploadWidth}%`,
                         }}
                       />
                     </div>
                     <span style={styles.miniProgressLabel}>
-                      {p.jobProgress?.percent != null
-                        ? `${Math.round(p.jobProgress.percent)}%`
-                        : p.status}
+                      {uploadLabel}
                     </span>
                   </div>
                   {p.error && (
@@ -484,8 +518,9 @@ export default function IngestPage({ systemStatus = {} }) {
                       {p.error.length > 20 ? p.error.substring(0, 20) + "..." : p.error}
                     </span>
                   )}
-                </div>
-              ))}
+                  </div>
+                );
+              })}
             </div>
           )}
         </section>
@@ -618,6 +653,9 @@ export default function IngestPage({ systemStatus = {} }) {
                 const jobInfo = d.hash ? jobInfoByHash.get(d.hash) : null;
                 const jobProgress = jobInfo?.progress;
                 const showDocProgress = isInProgress && jobProgress && typeof jobProgress.percent === "number";
+                const docProgressPercent = clampPercent(jobProgress?.percent, 0);
+                const docProgressWidth = Math.max(5, docProgressPercent);
+                const docProgressLabel = formatProgressDetails(jobProgress) || statusLabel.toUpperCase();
                 
                 return (
                   <li key={d.hash || d.stored_name || d.name} style={styles.listItem}>
@@ -722,12 +760,12 @@ export default function IngestPage({ systemStatus = {} }) {
                           <div
                             style={{
                               ...styles.progressFill,
-                              width: `${Math.max(5, Math.min(100, jobProgress.percent))}%`,
+                              width: `${docProgressWidth}%`,
                             }}
                           />
                         </div>
                         <div style={styles.progressLabel}>
-                          {`${Math.round(jobProgress.percent)}% · ${(jobProgress.stage || "processing").replace(/[:_]/g, " ")}`}
+                          {docProgressLabel}
                         </div>
                       </div>
                     )}
