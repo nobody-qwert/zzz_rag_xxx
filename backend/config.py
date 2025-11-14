@@ -11,7 +11,6 @@ class AppSettings:
     data_dir: Path
     index_dir: Path
     doc_store_path: Path
-    parser_mode: str
     min_pymupdf_chars_per_page: int
     ocr_parser_key: str
     ocr_module_url: str
@@ -74,7 +73,6 @@ def load_settings() -> AppSettings:
         data_dir=data_dir,
         index_dir=index_dir,
         doc_store_path=doc_store_path,
-        parser_mode=_str_env("PARSER_MODE", "ocr").lower(),
         min_pymupdf_chars_per_page=_int_env("MIN_PYMUPDF_CHARS_PER_PAGE", "300"),
         ocr_parser_key=ocr_parser_key,
         ocr_module_url=_str_env("OCR_MODULE_URL", "http://ocr-module:8000").rstrip("/"),

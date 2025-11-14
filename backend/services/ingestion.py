@@ -181,79 +181,49 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
             meta_json=json.dumps({"pages": py_out.get("pages", 0)}),
         )
 
-        pymupdf_text = py_out.get("text", "") or ""
-        chosen_text = pymupdf_text
-        chosen_meta: Dict[str, Any] = {"parser_used": "pymupdf", "reason": "default"}
+        chosen_text = ""
+        chosen_meta: Dict[str, Any] = {"parser_used": settings.ocr_parser_key}
 
-        run_ocr = settings.parser_mode != "pymupdf"
-        ocr_allowed = _is_pdf_file(doc_path)
-        if run_ocr and not ocr_allowed:
-            run_ocr = False
-            logger.debug("Skipping OCR for non-PDF file %s", doc_path)
+        start_mineru = time.perf_counter()
+        set_progress("ocr", 0.0, stage="queued")
 
-        if run_ocr:
-            start_mineru = time.perf_counter()
-            set_progress("ocr", 0.0, stage="queued")
-
-            def ocr_progress_callback(data: Dict[str, Any]) -> None:
-                if not data:
-                    return
-                stage = str(data.get("stage") or "ocr")
-                percent = data.get("percent")
-                current = data.get("current")
-                total = data.get("total")
-                try:
-                    percent_val = float(percent) if percent is not None else jobs_registry.get(job_id, {}).get("progress", {}).get("percent", 0.0)
-                except (TypeError, ValueError):
-                    percent_val = jobs_registry.get(job_id, {}).get("progress", {}).get("percent", 0.0)
-                set_progress("ocr", percent_val, stage=stage, current=current, total=total)
-
+        def ocr_progress_callback(data: Dict[str, Any]) -> None:
+            if not data:
+                return
+            stage = str(data.get("stage") or "ocr")
+            percent = data.get("percent")
+            current = data.get("current")
+            total = data.get("total")
             try:
-                ocr_result = await _call_ocr_module(doc_hash, doc_path, progress_cb=ocr_progress_callback)
-                mineru_time = time.perf_counter() - start_mineru
-                set_progress("ocr", 100.0, stage="completed")
-                ocr_text = ocr_result.get("text") or ""
-                ocr_meta = ocr_result.get("metadata") or {}
-                await document_store.upsert_extraction(
-                    doc_hash,
-                    settings.ocr_parser_key,
-                    text=ocr_text or pymupdf_text,
-                    meta_json=json.dumps({**ocr_meta, "source": "ocr", "fallback_used": not bool(ocr_text)}),
-                )
-                if ocr_text:
-                    chosen_text = ocr_text
-                    chosen_meta = {"parser_used": settings.ocr_parser_key}
-                else:
-                    chosen_meta = {
-                        "parser_used": "pymupdf",
-                        "reason": "ocr_empty_text",
-                    }
-            except Exception as exc:
-                mineru_time = None
-                logger.warning("OCR module failed for %s: %s — falling back to PyMuPDF text", doc_path, exc)
-                set_progress("ocr", 100.0, stage="failed", error=str(exc))
-                fallback_meta = {
-                    "parser_used": "pymupdf",
-                    "reason": f"ocr_module_failed: {exc}",
-                }
-                chosen_text = pymupdf_text
-                chosen_meta = fallback_meta
-                await document_store.upsert_extraction(
-                    doc_hash,
-                    settings.ocr_parser_key,
-                    text=pymupdf_text,
-                    meta_json=json.dumps({**fallback_meta, "source": "pymupdf"}),
-                )
-        else:
-            skip_reason = "non_pdf" if not ocr_allowed else "pymupdf_only"
-            chosen_meta = {"parser_used": "pymupdf", "reason": skip_reason}
-            set_progress("ocr", 100.0, stage="skipped", reason=skip_reason)
-            await document_store.upsert_extraction(
-                doc_hash,
-                settings.ocr_parser_key,
-                text=pymupdf_text,
-                meta_json=json.dumps({"parser_used": "pymupdf", "reason": skip_reason, "source": "pymupdf"}),
-            )
+                percent_val = float(percent) if percent is not None else jobs_registry.get(job_id, {}).get("progress", {}).get("percent", 0.0)
+            except (TypeError, ValueError):
+                percent_val = jobs_registry.get(job_id, {}).get("progress", {}).get("percent", 0.0)
+            set_progress("ocr", percent_val, stage=stage, current=current, total=total)
+
+        try:
+            ocr_result = await _call_ocr_module(doc_hash, doc_path, progress_cb=ocr_progress_callback)
+            mineru_time = time.perf_counter() - start_mineru
+        except Exception as exc:
+            mineru_time = None
+            logger.error("OCR module failed for %s: %s", doc_path, exc)
+            set_progress("ocr", 100.0, stage="failed", error=str(exc))
+            raise
+
+        ocr_text_raw = ocr_result.get("text") or ""
+        ocr_text = ocr_text_raw.strip()
+        if not ocr_text:
+            set_progress("ocr", 100.0, stage="failed", error="empty_text")
+            raise RuntimeError(f"OCR parser returned no text for document '{display_name}'")
+
+        ocr_meta = ocr_result.get("metadata") or {}
+        await document_store.upsert_extraction(
+            doc_hash,
+            settings.ocr_parser_key,
+            text=ocr_text,
+            meta_json=json.dumps({**ocr_meta, "source": "ocr"}),
+        )
+        chosen_text = ocr_text
+        set_progress("ocr", 100.0, stage="completed")
 
         start_chunking = time.perf_counter()
         chunk_specs = [
@@ -420,17 +390,6 @@ async def _extract_pymupdf(path: Path) -> Dict[str, Any]:
             doc.close()
 
     return await asyncio.to_thread(_run)
-
-
-def _is_pdf_file(path: Path) -> bool:
-    try:
-        with open(path, "rb") as handle:
-            sig = handle.read(5)
-            if isinstance(sig, bytes) and sig.startswith(b"%PDF-"):
-                return True
-    except Exception:
-        pass
-    return path.suffix.lower() == ".pdf"
 
 
 async def _call_ocr_module(
