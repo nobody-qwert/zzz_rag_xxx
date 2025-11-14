@@ -456,6 +456,25 @@ class DocumentStore:
         finally:
             await conn.close()
 
+    async def count_embeddings_by_parser(self, doc_hash: str) -> Dict[str, int]:
+        conn = await self._conn()
+        try:
+            cur = await conn.execute(
+                """
+                SELECT c.parser, COUNT(e.chunk_id) as total
+                FROM embeddings e
+                JOIN chunks c ON c.chunk_id = e.chunk_id
+                WHERE e.doc_hash=? AND c.doc_hash=?
+                GROUP BY c.parser
+                """,
+                (doc_hash, doc_hash),
+            )
+            rows = await cur.fetchall()
+            await cur.close()
+            return {str(row["parser"]): int(row["total"]) for row in rows}
+        finally:
+            await conn.close()
+
     # Performance Metrics
     async def save_performance_metrics(
         self,

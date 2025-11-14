@@ -278,7 +278,8 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
         )
 
         start_embedding = time.perf_counter()
-        set_progress("embedding", 0.0, stage="starting", chunks=len(small_chunk_rows))
+        total_chunk_rows = len(small_chunk_rows) + len(large_chunk_rows)
+        set_progress("embedding", 0.0, stage="starting", chunks=total_chunk_rows)
         emb_client = EmbeddingClient()
 
         def embedding_progress_callback(info: Dict[str, Any]) -> None:
@@ -301,7 +302,7 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
         rows = await _compute_embeddings_for_chunks(
             [
                 {"chunk_id": cid, "order_index": idx, "text": txt, "token_count": tok}
-                for (cid, idx, txt, tok) in small_chunk_rows
+                for (cid, idx, txt, tok) in (small_chunk_rows + large_chunk_rows)
             ],
             emb_client,
             doc_hash,
@@ -309,7 +310,14 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
         )
         await document_store.replace_embeddings(rows)
         embedding_time = time.perf_counter() - start_embedding
-        set_progress("embedding", 100.0, stage="completed", embeddings=len(rows))
+        set_progress(
+            "embedding",
+            100.0,
+            stage="completed",
+            embeddings=len(rows),
+            small_embeddings=len(small_chunk_rows),
+            large_embeddings=len(large_chunk_rows),
+        )
 
         total_time = time.perf_counter() - start_total
         try:

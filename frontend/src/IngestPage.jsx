@@ -300,13 +300,22 @@ export default function IngestPage({ systemStatus = {} }) {
       if (!res.ok) {
         throw new Error((data && (data.detail || data.error || data.raw)) || `GET preview ${res.status}`);
       }
+      const totalEmbeddings = Number(data.total_embeddings ?? data.chunk_count ?? 0) || 0;
+      const hasSmall = typeof data.small_embeddings === "number";
+      const hasLarge = typeof data.large_embeddings === "number";
+      const smallEmbeddings = hasSmall ? Number(data.small_embeddings) : totalEmbeddings;
+      const inferredLarge = Math.max(0, totalEmbeddings - smallEmbeddings);
+      const largeEmbeddings = hasLarge ? Number(data.large_embeddings) : inferredLarge;
       setPreview(typeof data.preview === "string" ? data.preview : "");
       setPreviewInfo({
         document_name: data.document_name,
         file_size: data.file_size,
         extracted_chars: data.extracted_chars,
-        total_tokens: data.total_tokens,
+        total_tokens: typeof data.total_tokens === "number" ? data.total_tokens : 0,
         chunk_count: data.chunk_count,
+        total_embeddings: totalEmbeddings,
+        small_embeddings: smallEmbeddings,
+        large_embeddings: largeEmbeddings,
         preview_chars: data.preview_chars,
         truncated: !!data.truncated,
         parser,
@@ -511,12 +520,16 @@ export default function IngestPage({ systemStatus = {} }) {
                       <div style={{ fontSize: 11, color: "rgba(148, 163, 184, 0.85)", marginTop: 2 }}>Characters</div>
                     </div>
                     <div style={{ textAlign: "center", padding: "14px 16px", background: "rgba(147, 197, 253, 0.35)", borderRadius: 20, border: "none", boxShadow: "0 18px 34px rgba(3, 6, 20, 0.5)" }}>
-                      <div style={{ fontSize: 16, fontWeight: 600, color: "#c7d7ff" }}>{(previewInfo.total_tokens || 0).toLocaleString()}</div>
+                      <div style={{ fontSize: 16, fontWeight: 600, color: "#c7d7ff" }}>{Number(previewInfo.total_tokens || 0).toLocaleString()}</div>
                       <div style={{ fontSize: 11, color: "rgba(148, 163, 184, 0.85)", marginTop: 2 }}>Tokens</div>
                     </div>
                     <div style={{ textAlign: "center", padding: "14px 16px", background: "rgba(147, 197, 253, 0.35)", borderRadius: 20, border: "none", boxShadow: "0 18px 34px rgba(3, 6, 20, 0.5)" }}>
-                      <div style={{ fontSize: 16, fontWeight: 600, color: "#c7d7ff" }}>{previewInfo.chunk_count || 0}</div>
-                      <div style={{ fontSize: 11, color: "rgba(148, 163, 184, 0.85)", marginTop: 2 }}>Embeddings</div>
+                      <div style={{ fontSize: 16, fontWeight: 600, color: "#c7d7ff" }}>{Number(previewInfo.small_embeddings || 0).toLocaleString()}</div>
+                      <div style={{ fontSize: 11, color: "rgba(148, 163, 184, 0.85)", marginTop: 2 }}>Small Embeddings</div>
+                    </div>
+                    <div style={{ textAlign: "center", padding: "14px 16px", background: "rgba(147, 197, 253, 0.35)", borderRadius: 20, border: "none", boxShadow: "0 18px 34px rgba(3, 6, 20, 0.5)" }}>
+                      <div style={{ fontSize: 16, fontWeight: 600, color: "#c7d7ff" }}>{Number(previewInfo.large_embeddings || 0).toLocaleString()}</div>
+                      <div style={{ fontSize: 11, color: "rgba(148, 163, 184, 0.85)", marginTop: 2 }}>Large Embeddings</div>
                     </div>
                   </div>
                 )}

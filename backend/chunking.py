@@ -167,3 +167,9 @@ def chunk_text_multi(
             cb({"stage": "spec_completed", "percent": 100.0, "chunk_count": len(results[spec.name])})
 
     return results
+
+
+def count_text_tokens(text: str) -> int:
+    """Return the approximate token count used by the chunker."""
+    enc = _tokenizer()
+    return len(_encode(enc, text))

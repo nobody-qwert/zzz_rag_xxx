@@ -5,10 +5,12 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException
 
 try:
+    from ..chunking import count_text_tokens
     from ..dependencies import document_store, settings
     from .helpers import format_document_row
     from ..services.ingestion import delete_document as delete_document_service
 except ImportError:  # pragma: no cover
+    from chunking import count_text_tokens  # type: ignore
     from dependencies import document_store, settings  # type: ignore
     from routes.helpers import format_document_row  # type: ignore
     from services.ingestion import delete_document as delete_document_service  # type: ignore
@@ -54,13 +56,23 @@ async def debug_parsed_text(
     if not row:
         raise HTTPException(status_code=404, detail=f"No extraction found for parser '{parser_key}'")
     text = row["text"] or ""
+    total_tokens = count_text_tokens(text)
+    embedding_counts = await document_store.count_embeddings_by_parser(doc_hash)
+    small_embeddings = int(embedding_counts.get(settings.ocr_parser_key, 0))
+    large_embeddings = int(embedding_counts.get(settings.large_chunk_parser_key, 0))
+    total_embeddings = small_embeddings + large_embeddings
 
     return {
         "parser": parser_key,
         "document_name": doc.get("original_name", "unknown"),
         "file_size": doc.get("size", 0),
         "extracted_chars": len(text),
+        "total_tokens": total_tokens,
         "preview_chars": min(max_chars, len(text)),
         "truncated": len(text) > max_chars,
         "preview": text[:max_chars],
+        "chunk_count": total_embeddings,
+        "total_embeddings": total_embeddings,
+        "small_embeddings": small_embeddings,
+        "large_embeddings": large_embeddings,
     }
