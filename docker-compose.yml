@@ -121,6 +121,8 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        VITE_LLM_CONTEXT_SIZE: ${LLM_CONTEXT_SIZE:-10000}
     depends_on:
       - rag-backend
     ports:

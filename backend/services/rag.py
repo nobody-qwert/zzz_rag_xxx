@@ -73,7 +73,24 @@ async def ask_question(req: AskRequest) -> AskResponse:
     if distilled_vec is None:
         raise HTTPException(status_code=500, detail="Failed to embed query")
 
-    chunks = await document_store.fetch_chunks(parser=settings.ocr_parser_key)
+    parser_specs: List[Dict[str, str]] = [{"parser": settings.ocr_parser_key, "scale": "small"}]
+    if (
+        settings.large_chunk_parser_key
+        and settings.large_chunk_parser_key != settings.ocr_parser_key
+    ):
+        parser_specs.append({"parser": settings.large_chunk_parser_key, "scale": "large"})
+
+    chunks: List[Dict[str, Any]] = []
+    for spec in parser_specs:
+        parser_key = spec["parser"]
+        scale = spec["scale"]
+        parser_chunks = await document_store.fetch_chunks(parser=parser_key)
+        for chunk in parser_chunks:
+            chunk_copy = dict(chunk)
+            chunk_copy["parser"] = parser_key
+            chunk_copy["scale"] = scale
+            chunks.append(chunk_copy)
+
     chunk_ids = [chunk["chunk_id"] for chunk in chunks]
     emb_rows = await document_store.fetch_embeddings_for_chunks(chunk_ids)
     emb_by_id = {row.chunk_id: row for row in emb_rows}
@@ -110,7 +127,7 @@ async def ask_question(req: AskRequest) -> AskResponse:
         settings.chat_context_window - 16,
     )
     if prompt_token_limit <= 0:
-        raise HTTPException(status_code=500, detail="CHAT_CONTEXT_WINDOW too small for configured reserve")
+        raise HTTPException(status_code=500, detail="Context window too small for configured reserve")
 
     trimmed_history, history_truncated, _ = trim_history_for_budget(
         history_messages,
@@ -219,6 +236,8 @@ async def ask_question(req: AskRequest) -> AskResponse:
                 "total_chunks": total_chunks,
                 "chunk_text": chunk.get("text", ""),
                 "chunk_text_preview": chunk.get("text", "")[:200],
+                "parser": chunk.get("parser", settings.ocr_parser_key),
+                "scale": chunk.get("scale"),
             }
         )
 

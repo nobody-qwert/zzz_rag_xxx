@@ -5,6 +5,9 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 
+const ENV_CONTEXT_LIMIT = Number(import.meta.env.VITE_LLM_CONTEXT_SIZE || "10000") || 10000;
+const makeDefaultContextStats = () => ({ used: 0, limit: ENV_CONTEXT_LIMIT, truncated: false, ratio: 0 });
+
 async function readJsonSafe(res) {
   const ct = (res.headers.get("content-type") || "").toLowerCase();
   if (ct.includes("application/json")) { try { return await res.json(); } catch {} }
@@ -81,7 +84,7 @@ const markdownComponents = {
 };
 
 export default function ChatPage({ onAskingChange, warmupApi, llmReady, documents = [] }) {
-  const defaultContextStats = useMemo(() => ({ used: 0, limit: 10000, truncated: false, ratio: 0 }), []);
+  const defaultContextStats = useMemo(() => makeDefaultContextStats(), []);
   const [query, setQuery] = useState("");
   const [asking, setAsking] = useState(false);
   const [messages, setMessages] = useState([]);
@@ -90,7 +93,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
   const [docsLoading, setDocsLoading] = useState(false);
   const [warmingUp, setWarmingUp] = useState(false);
   const [warmedUp, setWarmedUp] = useState(false);
-  const [contextStats, setContextStats] = useState(() => ({ ...defaultContextStats }));
+  const [contextStats, setContextStats] = useState(() => makeDefaultContextStats());
   const [pendingFollowUp, setPendingFollowUp] = useState(null);
   const [continuing, setContinuing] = useState(false);
   const [expandedSources, setExpandedSources] = useState({});
@@ -253,7 +256,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
             <button onClick={() => navigate("/ingest")} style={{ ...styles.subtleButton, padding: "8px 16px" }}>Back to Ingestion</button>
             <button onClick={handleResetConversation} disabled={!messages.length && !conversationId} style={{ ...styles.subtleButton, padding: "8px 16px", opacity: (!messages.length && !conversationId) ? 0.5 : 1 }}>Reset Chat</button>
-            <ContextIndicator stats={contextStats} defaultLimit={defaultContextStats.limit} />
+            <ContextIndicator stats={contextStats} defaultLimit={ENV_CONTEXT_LIMIT} />
           </div>
         </div>
 

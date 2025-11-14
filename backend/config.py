@@ -61,6 +61,7 @@ def load_settings() -> AppSettings:
 
     chat_completion_max_tokens = _int_env("CHAT_COMPLETION_MAX_TOKENS", "2048")
     chat_completion_reserve = _int_env("CHAT_COMPLETION_RESERVE", str(chat_completion_max_tokens))
+    llm_context_size = _int_env("LLM_CONTEXT_SIZE", "10000")
 
     ocr_parser_key = _str_env("OCR_PARSER_KEY", "mineru").lower()
     large_chunk_size = _int_env("LARGE_CHUNK_SIZE", "1600")
@@ -75,7 +76,7 @@ def load_settings() -> AppSettings:
         ocr_parser_key=ocr_parser_key,
         ocr_module_url=_str_env("OCR_MODULE_URL", "http://ocr-module:8000").rstrip("/"),
         ocr_module_timeout=_float_env("OCR_MODULE_TIMEOUT", "120"),
-        chat_context_window=_int_env("CHAT_CONTEXT_WINDOW", "10000"),
+        chat_context_window=llm_context_size,
         chat_completion_max_tokens=chat_completion_max_tokens,
         chat_completion_reserve=chat_completion_reserve,
         min_context_similarity=float(os.environ.get("MIN_CONTEXT_SIMILARITY", "0.35") or 0.35),
