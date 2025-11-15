@@ -46,7 +46,7 @@ async def list_parsers() -> Dict[str, Any]:
 async def debug_parsed_text(
     doc_hash: str,
     parser: Optional[str] = None,
-    max_chars: int = 2000,
+    max_chars: Optional[int] = 2000,
 ) -> Dict[str, Any]:
     parser_key = parser or settings.ocr_parser_key
     doc = await document_store.get_document(doc_hash)
@@ -62,15 +62,20 @@ async def debug_parsed_text(
     large_embeddings = int(embedding_counts.get(settings.chunk_config_large_id, 0))
     total_embeddings = small_embeddings + large_embeddings
 
+    text_length = len(text)
+    unlimited_preview = max_chars is None or max_chars <= 0
+    preview_limit = text_length if unlimited_preview else int(max_chars)
+    preview_chars = min(preview_limit, text_length)
+
     return {
         "parser": parser_key,
         "document_name": doc.get("original_name", "unknown"),
         "file_size": doc.get("size", 0),
         "extracted_chars": len(text),
         "total_tokens": total_tokens,
-        "preview_chars": min(max_chars, len(text)),
-        "truncated": len(text) > max_chars,
-        "preview": text[:max_chars],
+        "preview_chars": preview_chars,
+        "truncated": (not unlimited_preview) and text_length > preview_limit,
+        "preview": text[:preview_chars],
         "chunk_count": total_embeddings,
         "total_embeddings": total_embeddings,
         "small_embeddings": small_embeddings,

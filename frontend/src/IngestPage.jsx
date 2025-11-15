@@ -235,7 +235,7 @@ export default function IngestPage({ systemStatus = {} }) {
     retry: (hash) => `/api/ingest/${hash}/retry`,
     previewText: (hash, maxChars = null, parser = FALLBACK_PARSER) => {
       const params = new URLSearchParams({ parser });
-      if (typeof maxChars === "number" && maxChars > 0) {
+      if (typeof maxChars === "number" && Number.isFinite(maxChars)) {
         params.set("max_chars", String(maxChars));
       }
       return `/api/debug/parsed_text/${hash}?${params.toString()}`;
@@ -437,7 +437,7 @@ export default function IngestPage({ systemStatus = {} }) {
     setPreviewLoading(true);
 
     try {
-      const maxCharsParam = limitPreview ? previewMaxChars : null;
+      const maxCharsParam = limitPreview ? previewMaxChars : 0;
       const res = await fetch(api.previewText(doc.hash, maxCharsParam, parser));
       const data = await readJsonSafe(res);
       if (!res.ok) {
