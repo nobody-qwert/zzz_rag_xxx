@@ -422,16 +422,18 @@ export default function IngestPage({ systemStatus = {} }) {
     }
   }, [api.docs, refreshDocs, selectedDoc]);
 
-  const handlePreview = useCallback(async (doc, { skipSelect = false } = {}) => {
+  const handlePreview = useCallback(async (doc, { skipSelect = false, preserveContent = false } = {}) => {
     if (!doc || !doc.hash) return;
 
     if (!skipSelect) {
       setSelectedDoc(prev => (prev && prev.hash === doc.hash ? prev : doc));
     }
 
-    setPreview("");
+    if (!preserveContent) {
+      setPreview("");
+      setPreviewInfo(null);
+    }
     setPreviewError("");
-    setPreviewInfo(null);
     setPreviewLoading(true);
 
     try {
@@ -483,7 +485,7 @@ export default function IngestPage({ systemStatus = {} }) {
     }
 
     lastPreviewParamsRef.current = { previewMaxChars, limitPreview };
-    void handlePreview(doc, { skipSelect: true });
+    void handlePreview(doc, { skipSelect: true, preserveContent: true });
   }, [previewMaxChars, limitPreview, handlePreview]);
 
   // Poll active jobs
