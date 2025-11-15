@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -25,6 +26,19 @@ except ImportError:  # pragma: no cover
     from utils.files import safe_filename  # type: ignore
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _QueuedIngestJob:
+    job_id: str
+    doc_path: Path
+    doc_hash: str
+    display_name: str
+
+
+_job_queue: "asyncio.Queue[_QueuedIngestJob]" = asyncio.Queue()
+_worker_task: Optional["asyncio.Task[None]"] = None
+_worker_lock = asyncio.Lock()
 
 
 async def ingest_file(file: UploadFile) -> Dict[str, Any]:
@@ -134,8 +148,30 @@ async def _queue_job(source_path: Path, doc_hash: str, display_name: str) -> str
         "progress": {"phase": "queued", "stage": "queued", "percent": 0.0},
     }
     await document_store.create_job(job_id, doc_hash)
-    asyncio.create_task(_process_job(job_id, source_path, doc_hash, display_name))
+    await _job_queue.put(_QueuedIngestJob(job_id, source_path, doc_hash, display_name))
+    await _ensure_worker_running()
     return job_id
+
+
+async def _ensure_worker_running() -> None:
+    global _worker_task
+    async with _worker_lock:
+        if _worker_task is None or _worker_task.done():
+            _worker_task = asyncio.create_task(_job_worker())
+
+
+async def _job_worker() -> None:
+    while True:
+        job = await _job_queue.get()
+        try:
+            await _process_job(job.job_id, job.doc_path, job.doc_hash, job.display_name)
+        except asyncio.CancelledError:
+            _job_queue.put_nowait(job)
+            raise
+        except Exception:  # pragma: no cover - worker guard
+            logger.exception("Unhandled error while processing queued job %s", job.job_id)
+        finally:
+            _job_queue.task_done()
 
 
 async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name: str) -> None:
