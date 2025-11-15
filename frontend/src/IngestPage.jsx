@@ -6,6 +6,7 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
 import DiagnosticsPanel from "./components/DiagnosticsPanel";
+import "./IngestPage.css";
 
 async function readJsonSafe(res) {
   const ct = (res.headers.get("content-type") || "").toLowerCase();
@@ -61,9 +62,48 @@ function formatProgressDetails(progress) {
 }
 
 const styles = {
-  page: { display: "flex", flexWrap: "wrap", gap: 18, alignItems: "flex-start" },
-  leftColumn: { display: "grid", gap: 18, flex: "2 1 520px", minWidth: 0 },
-  libraryCard: { flex: "1 1 360px", minWidth: 0 },
+  page: {
+    display: "grid",
+    gridTemplateColumns: "var(--ingest-grid-columns, minmax(0, 1.65fr) minmax(320px, 0.95fr))",
+    gap: 20,
+    alignItems: "stretch",
+    width: "100%",
+    minHeight: "var(--ingest-left-min-height, calc(100vh - 64px))",
+  },
+  leftColumn: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 18,
+    minWidth: 0,
+    minHeight: "var(--ingest-left-min-height, calc(100vh - 64px))",
+    height: "100%",
+  },
+  uploadCard: { display: "flex", flexDirection: "column", minHeight: 0, flex: "0 0 auto" },
+  uploadProgressList: {
+    marginTop: 12,
+    flex: 1,
+    minHeight: 0,
+    maxHeight: "var(--ingest-upload-scroll-height, calc(5 * 58px))",
+    overflow: "auto",
+    paddingRight: 4,
+  },
+  previewCard: { display: "flex", flexDirection: "column", minHeight: 0, flex: "1 1 auto" },
+  previewBody: { flex: 1, display: "flex", flexDirection: "column", minHeight: 0 },
+  previewContent: { flex: 1, display: "flex", flexDirection: "column", minHeight: 0 },
+  libraryCard: {
+    minWidth: 0,
+    minHeight: 0,
+    width: "100%",
+    display: "flex",
+    flexDirection: "column",
+    gap: 16,
+    alignSelf: "stretch",
+    position: "var(--ingest-library-position, sticky)",
+    top: "var(--ingest-library-top, 16px)",
+    minHeight: "var(--ingest-library-height, calc(100vh - 64px))",
+    height: "100%",
+    overflow: "hidden",
+  },
   card: { border: "none", borderRadius: 26, padding: "24px 26px", background: "linear-gradient(150deg, rgba(78, 89, 162, 0.98), rgba(26, 30, 64, 0.95))", boxShadow: "0 38px 76px rgba(5, 8, 25, 0.78)" },
   sectionHeader: { display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, marginBottom: 12 },
   sectionTitle: { margin: 0, fontSize: 18, fontWeight: 600, letterSpacing: 0.2 },
@@ -73,7 +113,19 @@ const styles = {
   subtleButton: { font: "inherit", fontSize: 13, padding: "8px 18px", borderRadius: 999, border: "none", background: "rgba(77, 88, 142, 0.96)", color: "rgba(248, 250, 255, 0.96)", cursor: "pointer", boxShadow: "0 18px 32px rgba(6, 9, 23, 0.62)", transition: "transform 0.15s ease, box-shadow 0.15s ease" },
   input: { font: "inherit", padding: "12px 20px", borderRadius: 999, border: "none", background: "rgba(23, 28, 60, 0.98)", color: "inherit", minWidth: 0, boxShadow: "0 0 0 2px rgba(59, 130, 246, 0.26), inset 0 2px 14px rgba(3, 6, 18, 0.7)", outline: "none" },
   feedback: { marginTop: 10, fontSize: 13, color: "rgba(148, 163, 184, 0.85)" },
-  docs: { maxHeight: "55vh", overflow: "auto", border: "none", borderRadius: 26, padding: 16, background: "rgba(21, 26, 58, 0.97)", boxShadow: "0 24px 46px rgba(0, 0, 0, 0.6), inset 0 0 0 2px rgba(99, 102, 241, 0.11)" },
+  docs: {
+    flex: 1,
+    width: "100%",
+    minHeight: 0,
+    overflowY: "auto",
+    overflowX: "hidden",
+    maxHeight: "var(--ingest-library-scroll-max-height, calc(100vh - 180px))",
+    border: "none",
+    borderRadius: 26,
+    padding: 16,
+    background: "rgba(21, 26, 58, 0.97)",
+    boxShadow: "0 24px 46px rgba(0, 0, 0, 0.6), inset 0 0 0 2px rgba(99, 102, 241, 0.11)",
+  },
   listItem: { padding: "12px 18px 12px", borderRadius: 20, background: "rgba(50, 63, 128, 0.96)", border: "none", marginBottom: 14, display: "flex", flexDirection: "column", gap: 4, boxShadow: "0 18px 32px rgba(4, 7, 20, 0.65)" },
   docTitleRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 },
   docTitleActions: { display: "flex", alignItems: "center", gap: 8, flexShrink: 0 },
@@ -103,9 +155,18 @@ const styles = {
     borderRadius: 22,
     background: "rgba(23, 28, 60, 0.97)",
     padding: 18,
-    maxHeight: "40vh",
+    flex: 1,
+    minHeight: 0,
     overflow: "auto",
     boxShadow: "0 22px 38px rgba(0, 0, 0, 0.5), inset 0 0 0 2px rgba(99, 102, 241, 0.14)",
+  },
+  previewEmpty: {
+    flex: 1,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "40px 20px",
+    color: "rgba(148, 163, 184, 0.7)",
   },
   markdown: { fontSize: 14, lineHeight: 1.6, color: "#f8fbff", whiteSpace: "normal", wordBreak: "break-word" },
   markdownTable: { width: "100%", borderCollapse: "collapse", margin: "12px 0" },
@@ -469,9 +530,9 @@ export default function IngestPage({ systemStatus = {} }) {
   return (
     <div style={{ position: "relative" }}>
       <DiagnosticsPanel open={diagnosticsOpen} onToggle={toggleDiagnostics} groups={settingsGroups} />
-      <div style={styles.page}>
+      <div className="ingest-layout" style={styles.page}>
       <div style={styles.leftColumn}>
-        <section style={styles.card}>
+        <section style={{ ...styles.card, ...styles.uploadCard }}>
           <div style={styles.sectionHeader}>
             <h3 style={styles.sectionTitle}>Upload Documents</h3>
             <span style={styles.badge}>{uploading ? "Uploading" : activeJobs.size > 0 ? "Processing" : "Ready"}</span>
@@ -498,7 +559,7 @@ export default function IngestPage({ systemStatus = {} }) {
           
           {/* Upload Progress */}
           {uploadProgress.length > 0 && (
-            <div style={{ marginTop: 12, maxHeight: "200px", overflow: "auto" }}>
+            <div style={styles.uploadProgressList}>
               {uploadProgress.map((p) => {
                 const uploadWidth = clampPercent(p.jobProgress?.percent, 0);
                 const uploadLabel = formatProgressDetails(p.jobProgress) || p.status;
@@ -552,12 +613,12 @@ export default function IngestPage({ systemStatus = {} }) {
           )}
         </section>
 
-        <section style={styles.card}>
-          <div style={styles.sectionHeader}>
-            <h3 style={styles.sectionTitle}>Document Details & Preview</h3>
-            {selectedDoc && <span style={styles.badge}>{parser}</span>}
-          </div>
-          
+        <section style={{ ...styles.card, ...styles.previewCard }}>
+        <div style={styles.sectionHeader}>
+          <h3 style={styles.sectionTitle}>Document Details & Preview</h3>
+          {selectedDoc && <span style={styles.badge}>{parser}</span>}
+        </div>
+        <div style={styles.previewBody}>
           {selectedDoc ? (
             <>
               {/* Document Metadata Section */}
@@ -603,7 +664,7 @@ export default function IngestPage({ systemStatus = {} }) {
               </div>
               
               {/* Text Preview Section */}
-              <div>
+              <div style={styles.previewContent}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(148, 163, 184, 0.9)", marginBottom: 6 }}>Extracted Text</div>
                 <div style={{ ...styles.previewText, wordBreak: "break-word", overflowWrap: "anywhere" }}>
                   {previewLoading ? (
@@ -632,11 +693,14 @@ export default function IngestPage({ systemStatus = {} }) {
               </div>
             </>
           ) : (
-            <div style={{ textAlign: "center", padding: "40px 20px", color: "rgba(148, 163, 184, 0.7)" }}>
-              <div style={{ fontSize: 32, marginBottom: 12 }}>📄</div>
-              <div>Select a document from the library below to view its details and preview the extracted text.</div>
+            <div style={styles.previewEmpty}>
+              <div>
+                <div style={{ fontSize: 32, marginBottom: 12 }}>📄</div>
+                <div>Select a document from the library below to view its details and preview the extracted text.</div>
+              </div>
             </div>
           )}
+        </div>
         </section>
       </div>
 
