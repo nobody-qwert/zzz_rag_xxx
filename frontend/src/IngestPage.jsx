@@ -624,10 +624,11 @@ export default function IngestPage({ systemStatus = {} }) {
         </section>
 
         <section style={{ ...styles.card, ...styles.previewCard }}>
-        <div style={styles.sectionHeader}>
-          <h3 style={styles.sectionTitle}>Document Details & Preview</h3>
-          {selectedDoc && <span style={styles.badge}>{parser}</span>}
-        </div>
+        {!selectedDoc && (
+          <div style={styles.sectionHeader}>
+            <h3 style={styles.sectionTitle}>Document Details & Preview</h3>
+          </div>
+        )}
         <div style={styles.previewBody}>
           {selectedDoc ? (
             <>
@@ -638,6 +639,7 @@ export default function IngestPage({ systemStatus = {} }) {
                   <strong style={{ fontSize: 15, color: "#e2e8f0", flex: 1, minWidth: 0, wordBreak: "break-word" }}>
                     {previewInfo?.document_name || selectedDoc.name}
                   </strong>
+                  <span style={styles.badge}>{parser}</span>
                 </div>
                 
                 {/* Statistics Grid */}
