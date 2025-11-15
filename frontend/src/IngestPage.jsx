@@ -100,6 +100,11 @@ const styles = {
   },
   previewBody: { flex: 1, display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" },
   previewContent: { flex: 1, display: "flex", flexDirection: "column", minHeight: 0 },
+  previewHeaderRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 6 },
+  previewTitle: { fontSize: 13, fontWeight: 600, color: "rgba(148, 163, 184, 0.9)" },
+  previewLimiterControls: { display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" },
+  previewLimitToggle: { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "rgba(148, 163, 184, 0.85)" },
+  previewLimitCheckbox: { width: 16, height: 16, accentColor: "#818cf8" },
   libraryCard: {
     minWidth: 0,
     minHeight: 0,
@@ -228,7 +233,13 @@ export default function IngestPage({ systemStatus = {} }) {
     docs: "/api/documents",
     status: (jobId) => `/api/status/${jobId}`,
     retry: (hash) => `/api/ingest/${hash}/retry`,
-    previewText: (hash, maxChars = 2000, parser = FALLBACK_PARSER) => `/api/debug/parsed_text/${hash}?parser=${parser}&max_chars=${maxChars}`,
+    previewText: (hash, maxChars = null, parser = FALLBACK_PARSER) => {
+      const params = new URLSearchParams({ parser });
+      if (typeof maxChars === "number" && maxChars > 0) {
+        params.set("max_chars", String(maxChars));
+      }
+      return `/api/debug/parsed_text/${hash}?${params.toString()}`;
+    },
   }), []);
 
   const [docs, setDocs] = useState([]);
@@ -246,11 +257,12 @@ export default function IngestPage({ systemStatus = {} }) {
   const [previewError, setPreviewError] = useState("");
   const [previewInfo, setPreviewInfo] = useState(null);
   const [previewMaxChars, setPreviewMaxChars] = useState(2000);
+  const [limitPreview, setLimitPreview] = useState(true);
   const parser = FALLBACK_PARSER;
   const [expandedPerf, setExpandedPerf] = useState(new Set());
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const selectedDocRef = useRef(null);
-  const lastPreviewParamsRef = useRef({ previewMaxChars });
+  const lastPreviewParamsRef = useRef({ previewMaxChars, limitPreview });
 
   useEffect(() => {
     selectedDocRef.current = selectedDoc;
@@ -423,7 +435,8 @@ export default function IngestPage({ systemStatus = {} }) {
     setPreviewLoading(true);
 
     try {
-      const res = await fetch(api.previewText(doc.hash, previewMaxChars, parser));
+      const maxCharsParam = limitPreview ? previewMaxChars : null;
+      const res = await fetch(api.previewText(doc.hash, maxCharsParam, parser));
       const data = await readJsonSafe(res);
       if (!res.ok) {
         throw new Error((data && (data.detail || data.error || data.raw)) || `GET preview ${res.status}`);
@@ -453,24 +466,25 @@ export default function IngestPage({ systemStatus = {} }) {
     } finally {
       setPreviewLoading(false);
     }
-  }, [api, previewMaxChars]);
+  }, [api, previewMaxChars, limitPreview, parser]);
 
   useEffect(() => {
     const prev = lastPreviewParamsRef.current;
     const hasMaxChanged = prev.previewMaxChars !== previewMaxChars;
+    const hasLimitChanged = prev.limitPreview !== limitPreview;
     const doc = selectedDocRef.current;
 
     if (!doc?.hash) {
-      lastPreviewParamsRef.current = { previewMaxChars };
+      lastPreviewParamsRef.current = { previewMaxChars, limitPreview };
       return;
     }
-    if (!hasMaxChanged) {
+    if (!hasMaxChanged && !hasLimitChanged) {
       return;
     }
 
-    lastPreviewParamsRef.current = { previewMaxChars };
+    lastPreviewParamsRef.current = { previewMaxChars, limitPreview };
     void handlePreview(doc, { skipSelect: true });
-  }, [previewMaxChars, handlePreview]);
+  }, [previewMaxChars, limitPreview, handlePreview]);
 
   // Poll active jobs
   useEffect(() => {
@@ -668,16 +682,34 @@ export default function IngestPage({ systemStatus = {} }) {
                   </div>
                 )}
                 
-                {/* Preview Controls */}
-                <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                  <label style={{ ...styles.muted, fontSize: 12 }}>Max chars</label>
-                  <input type="number" min={200} max={20000} step={100} value={previewMaxChars} onChange={(e) => setPreviewMaxChars(Number(e.target.value) || 2000)} style={{ ...styles.input, width: 100, padding: "6px 10px", fontSize: 13 }} />
-                </div>
               </div>
               
               {/* Text Preview Section */}
               <div style={styles.previewContent}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(148, 163, 184, 0.9)", marginBottom: 6 }}>Extracted Text</div>
+                <div style={styles.previewHeaderRow}>
+                  <div style={styles.previewTitle}>Extracted Text</div>
+                  <div style={styles.previewLimiterControls}>
+                    <label style={styles.previewLimitToggle}>
+                      <input
+                        type="checkbox"
+                        checked={limitPreview}
+                        onChange={(e) => setLimitPreview(e.target.checked)}
+                        style={styles.previewLimitCheckbox}
+                      />
+                      <span>Limit preview</span>
+                    </label>
+                    <input
+                      type="number"
+                      min={200}
+                      max={20000}
+                      step={100}
+                      value={previewMaxChars}
+                      onChange={(e) => setPreviewMaxChars(Number(e.target.value) || 2000)}
+                      disabled={!limitPreview}
+                      style={{ ...styles.input, width: 100, padding: "6px 10px", fontSize: 13, opacity: limitPreview ? 1 : 0.45 }}
+                    />
+                  </div>
+                </div>
                 <div style={{ ...styles.previewText, wordBreak: "break-word", overflowWrap: "anywhere" }}>
                   {previewLoading ? (
                     <span style={styles.muted}>Loading…</span>
@@ -695,12 +727,6 @@ export default function IngestPage({ systemStatus = {} }) {
                     <span style={styles.muted}>No text extracted.</span>
                   )}
                 </div>
-                {previewInfo && (
-                  <div style={{ ...styles.muted, marginTop: 8, fontSize: 12 }}>
-                    {`Showing ${(previewInfo.preview_chars || 0).toLocaleString()} of ${(previewInfo.extracted_chars || 0).toLocaleString()} characters`}
-                    {previewInfo.truncated ? " (truncated)" : ""}
-                  </div>
-                )}
                 {previewError && (<div style={styles.error}>Error: {previewError}</div>)}
               </div>
             </>
