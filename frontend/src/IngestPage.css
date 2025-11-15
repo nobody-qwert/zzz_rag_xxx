@@ -2,6 +2,7 @@
   width: 100%;
   --ingest-grid-columns: minmax(0, 1.65fr) minmax(320px, 0.95fr);
   --ingest-left-min-height: calc(100vh - 64px);
+  --ingest-upload-height: 300px;
   --ingest-library-position: sticky;
   --ingest-library-top: 16px;
   --ingest-library-height: calc(100vh - 64px);
@@ -19,6 +20,7 @@
   .ingest-layout {
     --ingest-grid-columns: minmax(0, 1fr);
     --ingest-left-min-height: auto;
+    --ingest-upload-height: auto;
     --ingest-library-position: static;
     --ingest-library-top: auto;
     --ingest-library-height: auto;
