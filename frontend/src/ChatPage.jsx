@@ -33,9 +33,9 @@ function mergeSources(existing = [], incoming = []) {
 }
 
 const styles = {
-  page: { display: "flex", flexWrap: "wrap", gap: 18, alignItems: "stretch", width: "100%", minHeight: "calc(100vh - 32px)" },
-  chatCard: { flex: "2 1 540px", border: "none", borderRadius: 24, padding: "22px 24px", background: "linear-gradient(145deg, rgba(63, 76, 149, 0.98), rgba(22, 26, 55, 0.95))", boxShadow: "0 36px 72px rgba(5, 8, 25, 0.78)", display: "flex", flexDirection: "column", gap: 16, minHeight: "100%" },
-  sideCard: { flex: "1 1 320px", border: "none", borderRadius: 24, padding: "22px 22px", background: "linear-gradient(160deg, rgba(55, 68, 138, 0.97), rgba(18, 22, 48, 0.94))", boxShadow: "0 32px 64px rgba(5, 8, 25, 0.72)", display: "grid", gridTemplateRows: "auto auto 1fr", gap: 16, alignContent: "stretch", minHeight: "100%" },
+  page: { display: "flex", flexWrap: "wrap", gap: 18, alignItems: "stretch", width: "100%", height: "calc(100vh - 32px)", maxHeight: "calc(100vh - 32px)", overflow: "hidden" },
+  chatCard: { flex: "2 1 540px", border: "none", borderRadius: 24, padding: "22px 24px", background: "linear-gradient(145deg, rgba(63, 76, 149, 0.98), rgba(22, 26, 55, 0.95))", boxShadow: "0 36px 72px rgba(5, 8, 25, 0.78)", display: "flex", flexDirection: "column", gap: 16, minHeight: 0, maxHeight: "100%", overflow: "hidden" },
+  sideCard: { flex: "1 1 320px", border: "none", borderRadius: 24, padding: "22px 22px", background: "linear-gradient(160deg, rgba(55, 68, 138, 0.97), rgba(18, 22, 48, 0.94))", boxShadow: "0 32px 64px rgba(5, 8, 25, 0.72)", display: "grid", gridTemplateRows: "auto auto 1fr", gap: 16, alignContent: "stretch", minHeight: 0, maxHeight: "100%", overflow: "hidden" },
   sectionHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" },
   sectionTitle: { margin: 0, fontSize: 20, fontWeight: 600, letterSpacing: 0.25, color: "#ffffff" },
   badge: { padding: "6px 12px", borderRadius: 999, border: "1px solid rgba(255, 255, 255, 0.6)", fontSize: 12, color: "#ffffff", whiteSpace: "nowrap" },
@@ -43,7 +43,7 @@ const styles = {
   subtleButton: { font: "inherit", fontSize: 13, padding: "8px 18px", borderRadius: 999, border: "none", background: "rgba(66, 77, 124, 0.96)", color: "#fdfdff", cursor: "pointer", boxShadow: "0 16px 30px rgba(6, 9, 25, 0.65)", transition: "transform 0.15s ease, box-shadow 0.15s ease" },
   input: { font: "inherit", padding: "12px 22px", borderRadius: 999, border: "none", background: "rgba(21, 26, 54, 0.98)", color: "#ffffff", flex: 1, minWidth: 0, boxShadow: "0 0 0 2px rgba(59, 130, 246, 0.3), inset 0 2px 14px rgba(3, 6, 18, 0.7)", outline: "none" },
   muted: { fontSize: 13, color: "#f8fbff" },
-  messages: { flex: 1, minHeight: 240, minWidth: 0, overflow: "auto", border: "none", borderRadius: 24, padding: 20, background: "rgba(22, 27, 58, 0.98)", whiteSpace: "pre-wrap", display: "flex", flexDirection: "column", gap: 12, boxShadow: "0 22px 48px rgba(3, 5, 15, 0.75), inset 0 0 0 2px rgba(99, 102, 241, 0.14)" },
+  messages: { flex: 1, minHeight: 240, minWidth: 0, overflow: "auto", border: "none", borderRadius: 24, padding: 20, background: "rgba(22, 27, 58, 0.98)", whiteSpace: "pre-wrap", display: "flex", flexDirection: "column", gap: 12, boxShadow: "0 22px 48px rgba(3, 5, 15, 0.75), inset 0 0 0 2px rgba(99, 102, 241, 0.14)", maxHeight: "100%" },
   messageList: { display: "flex", flexDirection: "column", gap: 8 },
   userBubble: { alignSelf: "flex-end", background: "rgba(25, 77, 151, 0.95)", borderRadius: 22, padding: 15, maxWidth: "85%", boxShadow: "0 20px 40px rgba(3, 8, 23, 0.7)", color: "#fbfcff" },
   assistantBubble: { alignSelf: "flex-start", background: "rgba(30, 101, 201, 0.9)", borderRadius: 22, padding: 15, maxWidth: "95%", lineHeight: 1.65, boxShadow: "0 20px 40px rgba(3, 8, 23, 0.65)", color: "#fbfcff" },
@@ -70,7 +70,7 @@ const styles = {
   tableCell: { border: "1px solid rgba(148, 163, 184, 0.18)", padding: "8px 10px", textAlign: "left" },
   inlineCode: { background: "rgba(15, 23, 42, 0.6)", borderRadius: 8, padding: "2px 6px", fontSize: 13, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace' },
   codeBlock: { background: "rgba(15, 23, 42, 0.75)", borderRadius: 16, padding: "14px 16px", margin: "12px 0", overflowX: "auto", fontSize: 13, border: "1px solid rgba(148, 163, 184, 0.25)" },
-  docs: { overflow: "auto", border: "none", borderRadius: 24, padding: 18, background: "rgba(19, 24, 54, 0.97)", boxShadow: "0 20px 40px rgba(0, 0, 0, 0.58), inset 0 0 0 2px rgba(99, 102, 241, 0.1)", color: "#ffffff" },
+  docs: { overflow: "auto", border: "none", borderRadius: 24, padding: 18, background: "rgba(19, 24, 54, 0.97)", boxShadow: "0 20px 40px rgba(0, 0, 0, 0.58), inset 0 0 0 2px rgba(99, 102, 241, 0.1)", color: "#ffffff", minHeight: 0, maxHeight: "100%", height: "100%" },
   listItem: { padding: "14px 12px", borderRadius: 18, marginBottom: 12, background: "rgba(47, 58, 118, 0.95)", boxShadow: "0 14px 26px rgba(2, 6, 19, 0.62)", color: "#ffffff" },
   contextBadge: { padding: "8px 14px", borderRadius: 14, border: "1px solid rgba(255, 255, 255, 0.6)", fontSize: 12, color: "#ffffff", background: "rgba(12, 14, 22, 0.85)" },
   contextLabel: { fontSize: 12, color: "#ffffff" },
