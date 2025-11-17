@@ -19,6 +19,7 @@ async function readJsonSafe(res) {
 function prettyBytes(n) { if (n == null || isNaN(n)) return "-"; const u=["B","KB","MB","GB","TB"]; let i=0,v=n; while(v>=1024&&i<u.length-1){v/=1024;i++;} return `${v.toFixed(v<10&&i>0?1:0)} ${u[i]}`; }
 function shortHash(h){ return (h||"").slice(0,8); }
 const createMessageId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+function truncateName(name, max = 80) { if (typeof name !== "string") return ""; return name.length > max ? `${name.slice(0, max - 3)}...` : name; }
 function mergeSources(existing = [], incoming = []) {
   const base = Array.isArray(existing) ? existing : [];
   const extra = Array.isArray(incoming) ? incoming : [];
@@ -72,6 +73,7 @@ const styles = {
   codeBlock: { background: "rgba(15, 23, 42, 0.75)", borderRadius: 16, padding: "14px 16px", margin: "12px 0", overflowX: "auto", fontSize: 13, border: "1px solid rgba(148, 163, 184, 0.25)" },
   docs: { overflow: "auto", border: "none", borderRadius: 24, padding: 18, background: "rgba(19, 24, 54, 0.97)", boxShadow: "0 20px 40px rgba(0, 0, 0, 0.58), inset 0 0 0 2px rgba(99, 102, 241, 0.1)", color: "#ffffff", minHeight: 0, maxHeight: "100%", height: "100%" },
   listItem: { padding: "14px 12px", borderRadius: 18, marginBottom: 12, background: "rgba(47, 58, 118, 0.95)", boxShadow: "0 14px 26px rgba(2, 6, 19, 0.62)", color: "#ffffff" },
+  docTitle: { display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "normal", lineHeight: 1.35, maxWidth: "100%" },
   contextBadge: { padding: "8px 14px", borderRadius: 14, border: "1px solid rgba(255, 255, 255, 0.6)", fontSize: 12, color: "#ffffff", background: "rgba(12, 14, 22, 0.85)" },
   contextLabel: { fontSize: 12, color: "#ffffff" },
   kbd: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace' },
@@ -404,8 +406,8 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
             <ul style={{ margin: 0, paddingLeft: 0, listStyle: "none" }}>
               {displayDocs.map((d) => (
                 <li key={d.hash || d.stored_name || d.name} style={styles.listItem}>
-                  <div title={d.path} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    <strong>{d.name}</strong>
+                  <div title={d.name || d.stored_name || d.path} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <strong style={styles.docTitle}>{truncateName(d.name || d.stored_name || d.path || "")}</strong>
                     <span style={{ ...styles.muted, fontSize: 12 }}>{`${prettyBytes(d.size)}${d.hash ? ` · ${shortHash(d.hash)}` : ""}`}</span>
                   </div>
                 </li>
