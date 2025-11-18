@@ -40,6 +40,22 @@ function formatTiming(t) {
   if (typeof t.tokensPerSecond === "number") parts.push(`${t.tokensPerSecond.toFixed(1)} tok/s`);
   return parts.join(" · ");
 }
+function formatSteps(steps = []) {
+  if (!Array.isArray(steps) || steps.length === 0) return "";
+  return steps
+    .slice()
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    .map((s) => {
+      const name = s.name || s.kind || "step";
+      const dur = typeof s.duration_seconds === "number" ? `${s.duration_seconds.toFixed(2)}s` : "";
+      const ttft = typeof s.time_to_first_token_seconds === "number" ? `TTFT ${s.time_to_first_token_seconds.toFixed(2)}s` : "";
+      const tps = typeof s.tokens_per_second === "number" ? `${s.tokens_per_second.toFixed(1)} tok/s` : "";
+      const extras = [ttft, tps].filter(Boolean).join(", ");
+      const suffix = [dur, extras].filter(Boolean).join(" · ");
+      return suffix ? `${name} (${suffix})` : name;
+    })
+    .filter(Boolean);
+}
 
 const styles = {
   page: { display: "flex", flexWrap: "wrap", gap: 18, alignItems: "stretch", width: "100%", height: "calc(100vh - 32px)", maxHeight: "calc(100vh - 32px)", overflow: "hidden" },
@@ -56,6 +72,7 @@ const styles = {
   messageList: { display: "flex", flexDirection: "column", gap: 8 },
   userBubble: { alignSelf: "flex-end", background: "rgba(25, 77, 151, 0.95)", borderRadius: 22, padding: 15, maxWidth: "85%", boxShadow: "0 20px 40px rgba(3, 8, 23, 0.7)", color: "#fbfcff" },
   assistantBubble: { alignSelf: "flex-start", background: "rgba(30, 101, 201, 0.9)", borderRadius: 22, padding: 15, maxWidth: "95%", lineHeight: 1.65, boxShadow: "0 20px 40px rgba(3, 8, 23, 0.65)", color: "#fbfcff" },
+  systemBubble: { alignSelf: "center", background: "rgba(99, 102, 241, 0.18)", borderRadius: 18, padding: 14, maxWidth: "90%", lineHeight: 1.5, boxShadow: "0 16px 28px rgba(79, 70, 229, 0.35)", color: "#e0e7ff", border: "1px solid rgba(99, 102, 241, 0.45)" },
   errorBubble: { alignSelf: "flex-start", background: "rgba(252, 165, 165, 0.32)", borderRadius: 22, padding: 15, maxWidth: "95%", boxShadow: "0 16px 28px rgba(239, 68, 68, 0.35)" },
   messageRole: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.8, color: "#ffffff", marginBottom: 4 },
   sourcesBlock: { fontSize: 12, color: "#ffffff", marginTop: 10 },
@@ -164,7 +181,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
   };
 
   const runStreamingCompletion = useCallback(
-    async ({ payload, targetMessageId, baseContent = "", baseSources = [] }) => {
+    async ({ payload, targetMessageId = null, anchorMessageId = null, baseContent = "", baseSources = [] }) => {
       const res = await fetch(api.askStream, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       if (!res.ok || !res.body) {
         const data = await readJsonSafe(res);
@@ -176,11 +193,37 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
       let accumulated = baseContent || "";
       let finalMeta = null;
       let mergedSources = Array.isArray(baseSources) ? baseSources : [];
+      const seenStepOrders = new Set();
+      let assistantId = targetMessageId;
+
+      const ensureAssistant = () => {
+        if (assistantId) return assistantId;
+        const newId = createMessageId();
+        assistantId = newId;
+        setMessages((prev) => [...prev, { id: newId, role: "assistant", content: "" }]);
+        return newId;
+      };
+
+      const addStepBubble = (content) => {
+        if (!content) return;
+        const sysId = createMessageId();
+        setMessages((prev) => {
+          const next = [...prev];
+          const anchorIdx = next.findIndex(
+            (m) => m.id === anchorMessageId || m.id === targetMessageId || m.id === assistantId,
+          );
+          const insertionIdx = anchorIdx >= 0 ? anchorIdx + 1 : next.length;
+          next.splice(insertionIdx, 0, { id: sysId, role: "system", title: "Pipeline", content });
+          return next;
+        });
+      };
 
       const updateAssistant = (content) => {
+        const activeId = assistantId || targetMessageId;
+        if (!activeId) return;
         setMessages((prev) =>
           prev.map((msg) => {
-            if (msg.id !== targetMessageId) return msg;
+            if (msg.id !== activeId) return msg;
             return { ...msg, content };
           }),
         );
@@ -202,10 +245,20 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
             continue;
           }
           if (evt.type === "token") {
+            ensureAssistant();
             const delta = evt.content ?? evt.token ?? "";
             if (!delta) continue;
             accumulated += delta;
             updateAssistant(accumulated);
+          } else if (evt.type === "step") {
+            const steps = Array.isArray(evt.step) ? evt.step : [evt.step];
+            steps.filter(Boolean).forEach((s) => {
+              const orderKey = s.order;
+              if (orderKey != null && seenStepOrders.has(orderKey)) return;
+              if (orderKey != null) seenStepOrders.add(orderKey);
+              const stepLines = formatSteps([s]);
+              stepLines.forEach((line) => addStepBubble(line));
+            });
           } else if (evt.type === "final") {
             finalMeta = evt;
             if (typeof evt.answer === "string") {
@@ -242,9 +295,21 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
       const nextConversationId = finalMeta.conversation_id || payload.conversation_id || conversationId;
       if (nextConversationId) setConversationId(nextConversationId);
       const needsFollowUp = !!finalMeta.needs_follow_up;
+      const consolidatedSteps = Array.isArray(finalMeta.steps) ? finalMeta.steps : [];
+      if (consolidatedSteps.length) {
+        const sortedSteps = consolidatedSteps
+          .slice()
+          .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+          .filter((s) => {
+            if (s.order != null && seenStepOrders.has(s.order)) return false;
+            if (s.order != null) seenStepOrders.add(s.order);
+            return true;
+          });
+        sortedSteps.forEach((s) => formatSteps([s]).forEach((line) => addStepBubble(line)));
+      }
       setMessages((prev) =>
         prev.map((msg) => {
-          if (msg.id !== targetMessageId) return msg;
+          if (msg.id !== (assistantId || targetMessageId)) return msg;
           return {
             ...msg,
             content: accumulated,
@@ -266,7 +331,8 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
         truncated: !!finalMeta.context_truncated,
         ratio: typeof finalMeta.context_usage === "number" ? finalMeta.context_usage : 0,
       });
-      setPendingFollowUp(needsFollowUp ? { conversationId: nextConversationId, messageId: targetMessageId } : null);
+      setPendingFollowUp(needsFollowUp ? { conversationId: nextConversationId, messageId: assistantId || targetMessageId } : null);
+      // When streaming, steps are emitted individually via step events; final steps (if any) are also appended above.
     },
     [api.askStream, conversationId, defaultContextStats.limit],
   );
@@ -276,13 +342,12 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
     if (!trimmed || (warmingUp && !warmedUp) || pendingFollowUp || continuing) return;
     setAsking(true);
     const userId = createMessageId();
-    const assistantId = createMessageId();
-    setMessages((prev) => [...prev, { id: userId, role: "user", content: trimmed }, { id: assistantId, role: "assistant", content: "" }]);
+    setMessages((prev) => [...prev, { id: userId, role: "user", content: trimmed }]);
     setQuery("");
     try {
       const payload = { query: trimmed };
       if (conversationId) payload.conversation_id = conversationId;
-      await runStreamingCompletion({ payload, targetMessageId: assistantId });
+      await runStreamingCompletion({ payload, anchorMessageId: userId });
     } catch (e) {
       setMessages((prev) => [...prev, { id: createMessageId(), role: "assistant", content: `Error: ${e.message || String(e)}`, error: true }]);
     } finally {
@@ -301,6 +366,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
       await runStreamingCompletion({
         payload,
         targetMessageId: pendingFollowUp.messageId,
+        anchorMessageId: pendingFollowUp.messageId,
         baseContent: existingAssistant.content || "",
         baseSources: existingAssistant.sources || [],
       });
@@ -363,9 +429,18 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
             <div style={styles.messageList}>
               {messages.map((m, i) => {
                 const expandedForMessage = expandedSources[m.id] || [];
+                const bubbleStyle = m.error
+                  ? styles.errorBubble
+                  : m.role === "user"
+                  ? styles.userBubble
+                  : m.role === "system"
+                  ? styles.systemBubble
+                  : styles.assistantBubble;
+                const roleLabel =
+                  m.role === "user" ? "You" : m.role === "assistant" ? "Assistant" : m.title || "Pipeline";
                 return (
-                  <div key={m.id || `${m.role}-${i}-${Math.abs(m.content?.length || 0)}`} style={m.error ? styles.errorBubble : m.role === "user" ? styles.userBubble : styles.assistantBubble}>
-                  <div style={styles.messageRole}>{m.role === "user" ? "You" : "Assistant"}</div>
+                  <div key={m.id || `${m.role}-${i}-${Math.abs(m.content?.length || 0)}`} style={bubbleStyle}>
+                  <div style={styles.messageRole}>{roleLabel}</div>
                   <div style={styles.markdown}>
                     <ReactMarkdown
                       remarkPlugins={markdownRemarkPlugins}

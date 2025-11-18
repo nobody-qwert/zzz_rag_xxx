@@ -40,6 +40,18 @@ logger = logging.getLogger(__name__)
 
 
 async def _prepare_question_payload(req: AskRequest) -> Dict[str, Any]:
+    steps: List[Dict[str, Any]] = []
+    step_counter = 0
+
+    def _record_step(name: str, kind: str, start: float, extra: Optional[Dict[str, Any]] = None) -> None:
+        duration = max(0.0, time.perf_counter() - start)
+        nonlocal step_counter
+        entry: Dict[str, Any] = {"name": name, "kind": kind, "duration_seconds": duration, "order": step_counter}
+        step_counter += 1
+        if extra:
+            entry.update(extra)
+        steps.append(entry)
+
     is_continuation = bool(req.continue_last)
     raw_query = (req.query or "").strip()
     if not is_continuation and not raw_query:
@@ -77,19 +89,25 @@ async def _prepare_question_payload(req: AskRequest) -> Dict[str, Any]:
     distilled_query = build_distilled_query(history_summary, question)
 
     emb_client = EmbeddingClient()
+    embed_start = time.perf_counter()
     distilled_vec = await _embed_query(distilled_query, emb_client)
+    _record_step("Embed distilled query", "embedding", embed_start)
     if distilled_vec is None:
         raise HTTPException(status_code=500, detail="Failed to embed query")
 
     query_vec = distilled_vec
     try:
+        hyde_start = time.perf_counter()
         hyde_text = await _generate_hyde_answer(question, history_summary)
+        _record_step("HyDE LLM", "llm", hyde_start)
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.warning("HyDE generation raised an unexpected error: %s", exc)
         hyde_text = None
 
     if hyde_text:
+        hyde_embed_start = time.perf_counter()
         hyde_vec = await _embed_query(hyde_text, emb_client)
+        _record_step("Embed HyDE answer", "embedding", hyde_embed_start)
         if hyde_vec is not None:
             try:
                 query_vec = (np.asarray(distilled_vec, dtype=np.float32) + np.asarray(hyde_vec, dtype=np.float32)) / 2.0
@@ -130,6 +148,7 @@ async def _prepare_question_payload(req: AskRequest) -> Dict[str, Any]:
         chunks_per_doc[doc_hash] = chunks_per_doc.get(doc_hash, 0) + 1
 
     scored: List[Dict[str, Any]] = []
+    retrieval_start = time.perf_counter()
     for chunk in chunks:
         row = emb_by_id.get(chunk["chunk_id"])  # type: ignore[arg-type]
         if not row:
@@ -137,6 +156,7 @@ async def _prepare_question_payload(req: AskRequest) -> Dict[str, Any]:
         score = cosine_similarity(row.vector, query_vec)
         scored.append({"chunk": chunk, "score": score})
     scored.sort(key=lambda entry: entry["score"], reverse=True)
+    _record_step("Vector search", "retrieval", retrieval_start)
 
     top_k = max(1, min(req.top_k, 20))
     filtered_sections = [entry for entry in scored if entry["score"] >= settings.min_context_similarity]
@@ -236,6 +256,7 @@ async def _prepare_question_payload(req: AskRequest) -> Dict[str, Any]:
         "final_context_content": final_context_content,
         "messages": messages,
         "user_message_for_llm": user_message_for_llm,
+        "steps": steps,
     }
 
 
@@ -256,6 +277,7 @@ async def ask_question(req: AskRequest) -> AskResponse:
     final_context_content: str = prepared["final_context_content"]
     messages: List[Dict[str, str]] = prepared["messages"]
     user_message_for_llm: str = prepared["user_message_for_llm"]
+    steps: List[Dict[str, Any]] = prepared.get("steps", [])
 
     answer = ""
     reasoning = ""
@@ -326,6 +348,16 @@ async def ask_question(req: AskRequest) -> AskResponse:
     tokens_per_second = token_count / max(generation_seconds, 1e-6) if token_count and generation_seconds is not None else None
     time_to_first_token = time_to_first_token or generation_seconds
 
+    steps.append(
+        {
+            "name": "Main LLM",
+            "kind": "llm",
+            "duration_seconds": generation_seconds,
+            "time_to_first_token_seconds": time_to_first_token,
+            "tokens_per_second": tokens_per_second,
+        }
+    )
+
     needs_follow_up = finish_reason not in (None, "stop")
 
     return AskResponse(
@@ -341,6 +373,7 @@ async def ask_question(req: AskRequest) -> AskResponse:
         time_to_first_token_seconds=time_to_first_token,
         generation_seconds=generation_seconds,
         tokens_per_second=tokens_per_second,
+        steps=steps,
     )
 
 
@@ -503,6 +536,7 @@ async def stream_question(req: AskRequest):
     final_context_content: str = prepared["final_context_content"]
     user_message_for_llm: str = prepared["user_message_for_llm"]
     messages: List[Dict[str, str]] = prepared["messages"]
+    steps: List[Dict[str, Any]] = prepared.get("steps", [])
 
     sources = _build_sources(context_sections, docs_by_hash, chunks_per_doc)
 
@@ -516,6 +550,9 @@ async def stream_question(req: AskRequest):
         generation_seconds: Optional[float] = None
         tokens_per_second: Optional[float] = None
         try:
+            for step in steps:
+                yield _json_line({"type": "step", "step": step})
+
             if not context_sections:
                 final_answer = settings.no_context_response
                 finish_reason = "no_context"
@@ -578,6 +615,17 @@ async def stream_question(req: AskRequest):
             generation_seconds = max(0.0, total_time - time_to_first_token)
             token_count = estimate_tokens(final_answer, model=settings.llm_model)
             tokens_per_second = token_count / max(generation_seconds, 1e-6) if generation_seconds is not None else None
+            steps.append(
+                {
+                    "name": "Main LLM",
+                    "kind": "llm",
+                    "duration_seconds": generation_seconds,
+                    "time_to_first_token_seconds": time_to_first_token,
+                    "tokens_per_second": tokens_per_second,
+                    "order": len(steps),
+                }
+            )
+            yield _json_line({"type": "step", "step": steps[-1]})
             needs_follow_up = finish_reason not in (None, "stop")
             await _persist_conversation_turn(
                 conversation_id=conversation_id,
@@ -600,6 +648,7 @@ async def stream_question(req: AskRequest):
                 "time_to_first_token_seconds": time_to_first_token,
                 "generation_seconds": generation_seconds,
                 "tokens_per_second": tokens_per_second,
+                "steps": steps,
             }
             if reasoning:
                 payload["reasoning"] = reasoning

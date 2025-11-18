@@ -25,3 +25,4 @@ class AskResponse(BaseModel):
     time_to_first_token_seconds: Optional[float] = Field(default=None)
     generation_seconds: Optional[float] = Field(default=None)
     tokens_per_second: Optional[float] = Field(default=None)
+    steps: List[Dict[str, Any]] = Field(default_factory=list)
