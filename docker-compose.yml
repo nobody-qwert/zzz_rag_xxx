@@ -12,6 +12,7 @@ services:
       LLM_BASE_URL: ${LLM_BASE_URL:-http://${LLM_ENDPOINT:-llm_small}:8000/v1}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_USE_HARMONY: ${LLM_USE_HARMONY:-false}
+      CHAT_CONTEXT_SIZE: ${CHAT_CONTEXT_SIZE:-20000}
       EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
       EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL}
@@ -73,7 +74,7 @@ services:
       --host 0.0.0.0
       --port 8000
       --chat_format chatml
-      --n_ctx 20000
+      --n_ctx ${CHAT_CONTEXT_SIZE:-20000}
       --n_gpu_layers -1
       --use_mlock true
       --api_key ${LLM_API_KEY:-local-llm}
@@ -105,7 +106,7 @@ services:
       --host 0.0.0.0
       --port 8000
       --chat_format chatml
-      --n_ctx 30000
+      --n_ctx ${CHAT_CONTEXT_SIZE:-20000}
       --n_gpu_layers -1
       --flash_attn true
       --use_mlock true
@@ -157,7 +158,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        VITE_LLM_CONTEXT_SIZE: 30000
+        VITE_LLM_CONTEXT_SIZE: ${CHAT_CONTEXT_SIZE:-20000}
     depends_on:
       - rag-backend
     ports:
