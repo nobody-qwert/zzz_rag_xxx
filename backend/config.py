@@ -143,6 +143,6 @@ def load_settings() -> AppSettings:
         chunking_configs=chunking_configs,
         llm_base_url=_str_env("LLM_BASE_URL"),
         llm_api_key=_str_env("LLM_API_KEY"),
-        llm_model=_str_env("LLM_MODEL"),
+        llm_model=_str_env("LLM_MODEL", "default"),
         ocr_status_poll_interval=ocr_status_poll_interval,
     )

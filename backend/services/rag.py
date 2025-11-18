@@ -139,10 +139,10 @@ async def ask_question(req: AskRequest) -> AskResponse:
     filtered_sections = [entry for entry in scored if entry["score"] >= settings.min_context_similarity]
     context_sections = filtered_sections[:top_k]
 
-    if not settings.llm_base_url or not settings.llm_api_key or not settings.llm_model:
+    if not settings.llm_base_url or not settings.llm_api_key:
         raise HTTPException(
             status_code=500,
-            detail="LLM_BASE_URL, LLM_API_KEY, and LLM_MODEL must be set",
+            detail="LLM_BASE_URL and LLM_API_KEY must be set",
         )
 
     prompt_token_limit = min(
