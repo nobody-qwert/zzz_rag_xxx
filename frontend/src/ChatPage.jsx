@@ -73,7 +73,21 @@ const styles = {
   userBubble: { alignSelf: "flex-end", background: "rgba(25, 77, 151, 0.95)", borderRadius: 22, padding: 15, maxWidth: "85%", boxShadow: "0 20px 40px rgba(3, 8, 23, 0.7)", color: "#fbfcff" },
   assistantBubble: { alignSelf: "flex-start", background: "rgba(30, 101, 201, 0.9)", borderRadius: 22, padding: 15, maxWidth: "95%", lineHeight: 1.65, boxShadow: "0 20px 40px rgba(3, 8, 23, 0.65)", color: "#fbfcff" },
   systemBubble: { alignSelf: "center", background: "rgba(99, 102, 241, 0.18)", borderRadius: 18, padding: 10, maxWidth: "85%", lineHeight: 1.35, boxShadow: "0 10px 18px rgba(79, 70, 229, 0.25)", color: "#e0e7ff", border: "1px solid rgba(99, 102, 241, 0.35)" },
-  pipelineBubble: { alignSelf: "stretch", width: "100%", background: "rgba(99, 102, 241, 0.12)", borderRadius: 12, padding: "8px 12px", lineHeight: 1.25, boxShadow: "none", color: "#e0e7ff", border: "1px solid rgba(99, 102, 241, 0.3)", display: "flex", gap: 10, alignItems: "center" },
+  pipelineBubble: {
+    alignSelf: "stretch",
+    width: "100%",
+    background: "rgba(99, 102, 241, 0.12)",
+    borderRadius: 10,
+    padding: "6px 10px",
+    lineHeight: 1.1,
+    boxShadow: "none",
+    color: "#e0e7ff",
+    border: "1px solid rgba(99, 102, 241, 0.3)",
+    display: "flex",
+    gap: 8,
+    alignItems: "center",
+    fontSize: 13,
+  },
   errorBubble: { alignSelf: "flex-start", background: "rgba(252, 165, 165, 0.32)", borderRadius: 22, padding: 15, maxWidth: "95%", boxShadow: "0 16px 28px rgba(239, 68, 68, 0.35)" },
   messageRole: { fontSize: 11, textTransform: "uppercase", letterSpacing: 0.8, color: "#ffffff", marginBottom: 2, whiteSpace: "nowrap" },
   sourcesBlock: { fontSize: 12, color: "#ffffff", marginTop: 10 },
@@ -93,7 +107,7 @@ const styles = {
     wordBreak: "break-word",
   },
   markdown: { fontSize: 14, lineHeight: 1.65, color: "#fbfcff", whiteSpace: "normal", wordBreak: "break-word" },
-  markdownCompact: { fontSize: 13, lineHeight: 1.25, color: "#fbfcff", whiteSpace: "normal", wordBreak: "break-word" },
+  markdownCompact: { fontSize: 13, lineHeight: 1.1, color: "#fbfcff", whiteSpace: "normal", wordBreak: "break-word", margin: 0, padding: 0 },
   markdownTable: { width: "100%", borderCollapse: "collapse", margin: "12px 0" },
   tableCell: { border: "1px solid rgba(148, 163, 184, 0.18)", padding: "8px 10px", textAlign: "left" },
   inlineCode: { background: "rgba(15, 23, 42, 0.6)", borderRadius: 8, padding: "2px 6px", fontSize: 13, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace' },
@@ -222,12 +236,21 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
           const anchorIdx = next.findIndex(
             (m) => m.id === anchorMessageId || m.id === targetMessageId || m.id === assistantId,
           );
-          const insertionIdx = anchorIdx >= 0 ? anchorIdx + 1 : next.length;
+          const lastPipelineIdx = next.reduce(
+            (acc, m, idx) => (m.role === "system" && (m.title || "").toLowerCase() === "pipeline" ? idx : acc),
+            -1,
+          );
+          const insertionIdx =
+            lastPipelineIdx >= 0
+              ? lastPipelineIdx + 1
+              : anchorIdx >= 0
+              ? anchorIdx + 1
+              : next.length;
           const existingIdx = next.findIndex((m) => m.stepKey === key);
           if (existingIdx >= 0) {
-            next[existingIdx] = { ...next[existingIdx], content: contentLine, state: stepInfo.state };
+            next[existingIdx] = { ...next[existingIdx], content: contentLine, state: stepInfo.state, isPipeline: true };
           } else {
-            next.splice(insertionIdx, 0, { id: createMessageId(), role: "system", title: "Pipeline", content: contentLine, stepKey: key, state: stepInfo.state });
+            next.splice(insertionIdx, 0, { id: createMessageId(), role: "system", title: "Pipeline", isPipeline: true, content: contentLine, stepKey: key, state: stepInfo.state });
           }
           return next;
         });
@@ -431,23 +454,22 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
             <div style={styles.messageList}>
               {messages.map((m, i) => {
                 const expandedForMessage = expandedSources[m.id] || [];
+                const isPipeline = m.isPipeline || (m.role === "system" && (m.title || "").toLowerCase() === "pipeline");
                 const bubbleStyle = m.error
                   ? styles.errorBubble
                   : m.role === "user"
                   ? styles.userBubble
-                  : m.role === "system" && (m.title || "").toLowerCase() === "pipeline"
+                  : m.role === "system" && isPipeline
                   ? styles.pipelineBubble
                   : m.role === "system"
                   ? styles.systemBubble
                   : styles.assistantBubble;
-                const isPipeline = m.role === "system" && (m.title || "").toLowerCase() === "pipeline";
                 const markdownStyle = isPipeline ? styles.markdownCompact : styles.markdown;
                 const markdownRenderer = isPipeline ? pipelineMarkdownComponents : markdownComponents;
-                const roleLabel =
-                  m.role === "user" ? "You" : m.role === "assistant" ? "Assistant" : m.title || "Pipeline";
+                const roleLabel = m.role === "user" ? "You" : m.role === "assistant" ? "Assistant" : isPipeline ? "" : m.title ? m.title : "";
                 return (
                   <div key={m.id || `${m.role}-${i}-${Math.abs(m.content?.length || 0)}`} style={bubbleStyle}>
-                  <div style={styles.messageRole}>{roleLabel}</div>
+                  {roleLabel ? <div style={styles.messageRole}>{roleLabel}</div> : null}
                   <div style={markdownStyle}>
                     <ReactMarkdown
                       remarkPlugins={markdownRemarkPlugins}
