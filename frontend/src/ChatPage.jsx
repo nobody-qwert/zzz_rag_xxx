@@ -223,9 +223,14 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
         return newId;
       };
 
+      // Steps belong to a specific ask/turn; anchorKey keeps steps per request separate
+      const anchorKey = anchorMessageId || targetMessageId || assistantId || "run";
+
       const upsertStepBubble = (stepInfo) => {
         if (!stepInfo) return;
-        const key = stepInfo.order != null ? `order-${stepInfo.order}` : `${stepInfo.name || stepInfo.kind || "step"}-${stepInfo.kind || "unk"}`;
+        const key =
+          stepInfo.order != null ? `order-${stepInfo.order}` : `${stepInfo.name || stepInfo.kind || "step"}-${stepInfo.kind || "unk"}`;
+        const stepKey = `${anchorKey}-${key}`;
         const contentLine =
           stepInfo.state === "started"
             ? `${stepInfo.name || stepInfo.kind || "step"} (in progress...)`
@@ -233,24 +238,33 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
         if (!contentLine) return;
         setMessages((prev) => {
           const next = [...prev];
-          const anchorIdx = next.findIndex(
-            (m) => m.id === anchorMessageId || m.id === targetMessageId || m.id === assistantId,
-          );
-          const lastPipelineIdx = next.reduce(
-            (acc, m, idx) => (m.role === "system" && (m.title || "").toLowerCase() === "pipeline" ? idx : acc),
-            -1,
-          );
+          const anchorIdx = next.findIndex((m) => m.id === anchorMessageId || m.id === targetMessageId || m.id === assistantId);
+          const lastPipelineIdx = next.reduce((acc, m, idx) => {
+            const isPipeline = m.role === "system" && (m.title || "").toLowerCase() === "pipeline";
+            if (!isPipeline) return acc;
+            if (m.anchorKey && m.anchorKey === anchorKey) return Math.max(acc, idx);
+            return acc;
+          }, -1);
           const insertionIdx =
-            lastPipelineIdx >= 0
+            lastPipelineIdx >= 0 && next[lastPipelineIdx]?.anchorKey === anchorKey
               ? lastPipelineIdx + 1
               : anchorIdx >= 0
               ? anchorIdx + 1
               : next.length;
-          const existingIdx = next.findIndex((m) => m.stepKey === key);
+          const existingIdx = next.findIndex((m) => m.stepKey === stepKey);
           if (existingIdx >= 0) {
             next[existingIdx] = { ...next[existingIdx], content: contentLine, state: stepInfo.state, isPipeline: true };
           } else {
-            next.splice(insertionIdx, 0, { id: createMessageId(), role: "system", title: "Pipeline", isPipeline: true, content: contentLine, stepKey: key, state: stepInfo.state });
+            next.splice(insertionIdx, 0, {
+              id: createMessageId(),
+              role: "system",
+              title: "Pipeline",
+              isPipeline: true,
+              content: contentLine,
+              stepKey,
+              state: stepInfo.state,
+              anchorKey,
+            });
           }
           return next;
         });
