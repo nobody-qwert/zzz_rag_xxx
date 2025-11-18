@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import re
 from typing import Any, Dict, List, Optional
@@ -37,7 +38,7 @@ except ImportError:  # pragma: no cover
 logger = logging.getLogger(__name__)
 
 
-async def ask_question(req: AskRequest) -> AskResponse:
+async def _prepare_question_payload(req: AskRequest) -> Dict[str, Any]:
     is_continuation = bool(req.continue_last)
     raw_query = (req.query or "").strip()
     if not is_continuation and not raw_query:
@@ -203,7 +204,6 @@ async def ask_question(req: AskRequest) -> AskResponse:
             raise HTTPException(status_code=500, detail="Unable to fit prompt within context window")
         user_message_for_llm = truncated
         context_truncated = True
-
     context_tokens_used = prompt_tokens
     context_usage_ratio = min(1.0, context_tokens_used / float(settings.chat_context_window))
 
@@ -218,6 +218,43 @@ async def ask_question(req: AskRequest) -> AskResponse:
         *history_for_prompt,
         {"role": "user", "content": f"{final_context_content}\n\nQuestion:\n{user_message_for_llm}"},
     ]
+
+    return {
+        "is_continuation": is_continuation,
+        "question": question,
+        "conversation_id": conversation_id,
+        "history_messages": history_messages,
+        "history_for_prompt": history_for_prompt,
+        "history_truncated": history_truncated,
+        "context_sections": context_sections,
+        "context_truncated": context_truncated,
+        "context_tokens_used": context_tokens_used,
+        "context_usage_ratio": context_usage_ratio,
+        "docs_by_hash": docs_by_hash,
+        "chunks_per_doc": chunks_per_doc,
+        "final_context_content": final_context_content,
+        "messages": messages,
+        "user_message_for_llm": user_message_for_llm,
+    }
+
+
+async def ask_question(req: AskRequest) -> AskResponse:
+    prepared = await _prepare_question_payload(req)
+    is_continuation: bool = prepared["is_continuation"]
+    question: str = prepared["question"]
+    conversation_id: str = prepared["conversation_id"]
+    history_messages: List[Dict[str, str]] = prepared["history_messages"]
+    history_for_prompt: List[Dict[str, str]] = prepared["history_for_prompt"]
+    history_truncated: bool = prepared["history_truncated"]
+    context_sections: List[Dict[str, Any]] = prepared["context_sections"]
+    context_truncated: bool = prepared["context_truncated"]
+    context_tokens_used: int = prepared["context_tokens_used"]
+    context_usage_ratio: float = prepared["context_usage_ratio"]
+    docs_by_hash: Dict[str, Any] = prepared["docs_by_hash"]
+    chunks_per_doc: Dict[str, int] = prepared["chunks_per_doc"]
+    final_context_content: str = prepared["final_context_content"]
+    messages: List[Dict[str, str]] = prepared["messages"]
+    user_message_for_llm: str = prepared["user_message_for_llm"]
 
     answer = ""
     reasoning = ""
@@ -264,49 +301,15 @@ async def ask_question(req: AskRequest) -> AskResponse:
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"LLM call failed: {exc}")
 
-    sources: List[Dict[str, Any]] = []
-    for entry in context_sections:
-        chunk = entry["chunk"]
-        doc_hash = chunk["doc_hash"]
-        doc = docs_by_hash.get(doc_hash, {})
-        total_chunks = chunks_per_doc.get(doc_hash, 0)
-        sources.append(
-            {
-                "chunk_id": chunk["chunk_id"],
-                "score": entry["score"],
-                "doc_hash": doc_hash,
-                "order_index": chunk["order_index"],
-                "document_name": doc.get("original_name", "unknown"),
-                "total_chunks": total_chunks,
-                "chunk_text": chunk.get("text", ""),
-                "chunk_text_preview": chunk.get("text", "")[:200],
-                "parser": chunk.get("parser", settings.ocr_parser_key),
-                "scale": chunk.get("scale"),
-            }
-        )
+    sources = _build_sources(context_sections, docs_by_hash, chunks_per_doc)
 
-    if not is_continuation:
-        user_token_count = estimate_tokens(question, model=settings.llm_model)
-        await document_store.append_conversation_message(
-            conversation_id,
-            role="user",
-            content=question,
-            token_count=user_token_count,
-        )
-    assistant_token_count = estimate_tokens(answer, model=settings.llm_model)
-    await document_store.append_conversation_message(
-        conversation_id,
-        role="assistant",
-        content=answer,
-        token_count=assistant_token_count,
+    await _persist_conversation_turn(
+        conversation_id=conversation_id,
+        history_messages=history_messages,
+        question=question,
+        answer=answer,
+        is_continuation=is_continuation,
     )
-
-    updated_history = list(history_messages)
-    if not is_continuation:
-        updated_history.append({"role": "user", "content": question})
-    updated_history.append({"role": "assistant", "content": answer})
-    summary_text = summarize_history(updated_history)
-    await document_store.update_conversation_summary(conversation_id, summary_text)
 
     needs_follow_up = finish_reason not in (None, "stop")
 
@@ -439,13 +442,14 @@ def _build_completion_args(
     temperature: float,
     max_tokens: int,
     stop: Optional[List[str]] = None,
+    stream: bool = False,
 ) -> Dict[str, Any]:
     args: Dict[str, Any] = {
         "model": model,
         "messages": messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
-        "stream": False,
+        "stream": stream,
     }
     if stop:
         args["stop"] = stop
@@ -463,3 +467,174 @@ def _build_completion_args(
     if extra_body:
         args["extra_body"] = extra_body
     return args
+
+
+async def stream_question(req: AskRequest):
+    prepared = await _prepare_question_payload(req)
+    is_continuation: bool = prepared["is_continuation"]
+    question: str = prepared["question"]
+    conversation_id: str = prepared["conversation_id"]
+    history_messages: List[Dict[str, str]] = prepared["history_messages"]
+    history_truncated: bool = prepared["history_truncated"]
+    context_sections: List[Dict[str, Any]] = prepared["context_sections"]
+    context_truncated: bool = prepared["context_truncated"]
+    context_tokens_used: int = prepared["context_tokens_used"]
+    context_usage_ratio: float = prepared["context_usage_ratio"]
+    docs_by_hash: Dict[str, Any] = prepared["docs_by_hash"]
+    chunks_per_doc: Dict[str, int] = prepared["chunks_per_doc"]
+    final_context_content: str = prepared["final_context_content"]
+    user_message_for_llm: str = prepared["user_message_for_llm"]
+    messages: List[Dict[str, str]] = prepared["messages"]
+
+    sources = _build_sources(context_sections, docs_by_hash, chunks_per_doc)
+
+    async def _event_stream():
+        answer_parts: List[str] = []
+        reasoning = ""
+        finish_reason: Optional[str] = None
+        final_answer = ""
+        try:
+            if not context_sections:
+                final_answer = settings.no_context_response
+                finish_reason = "no_context"
+                yield _json_line({"type": "token", "content": final_answer})
+            else:
+                from openai import AsyncOpenAI  # type: ignore
+
+                client = AsyncOpenAI(base_url=settings.llm_base_url, api_key=settings.llm_api_key)
+                if settings.llm_use_harmony:
+                    harmony_prompt = _build_harmony_prompt(
+                        system_msg=settings.system_prompt,
+                        user_msg=f"{final_context_content}\n\nQuestion:\n{user_message_for_llm}",
+                    )
+                    completion_args = _build_completion_args(
+                        model=settings.llm_model,
+                        messages=[{"role": "user", "content": harmony_prompt}],
+                        temperature=settings.llm_temperature,
+                        max_tokens=settings.chat_completion_max_tokens,
+                        stop=_HARMONY_STOP,
+                        stream=True,
+                    )
+                else:
+                    completion_args = _build_completion_args(
+                        model=settings.llm_model,
+                        messages=messages,
+                        temperature=settings.llm_temperature,
+                        max_tokens=settings.chat_completion_max_tokens,
+                        stream=True,
+                    )
+                stream = await client.chat.completions.create(**completion_args)
+                async for chunk in stream:
+                    choice = chunk.choices[0] if chunk.choices else None
+                    if not choice:
+                        continue
+                    finish_reason = getattr(choice, "finish_reason", None) or finish_reason
+                    delta = getattr(choice, "delta", None)
+                    piece = ""
+                    if delta is not None:
+                        piece = getattr(delta, "content", None) or ""
+                    if not piece:
+                        message_obj = getattr(choice, "message", None)
+                        piece = getattr(message_obj, "content", None) or ""
+                    if piece:
+                        answer_parts.append(piece)
+                        yield _json_line({"type": "token", "content": piece})
+                raw_answer = "".join(answer_parts).strip()
+                if settings.llm_use_harmony:
+                    reasoning = _extract_harmony_reasoning(raw_answer)
+                    final_answer = _extract_harmony_final(raw_answer)
+                else:
+                    final_answer = raw_answer
+            if not final_answer:
+                final_answer = "".join(answer_parts).strip()
+            needs_follow_up = finish_reason not in (None, "stop")
+            await _persist_conversation_turn(
+                conversation_id=conversation_id,
+                history_messages=history_messages,
+                question=question,
+                answer=final_answer,
+                is_continuation=is_continuation,
+            )
+            payload = {
+                "type": "final",
+                "answer": final_answer,
+                "conversation_id": conversation_id,
+                "sources": sources,
+                "context_tokens_used": context_tokens_used,
+                "context_window_limit": settings.chat_context_window,
+                "context_usage": context_usage_ratio,
+                "context_truncated": history_truncated or context_truncated,
+                "finish_reason": finish_reason,
+                "needs_follow_up": needs_follow_up,
+            }
+            if reasoning:
+                payload["reasoning"] = reasoning
+            yield _json_line(payload)
+        except Exception as exc:
+            logger.exception("Streaming ask failed: %s", exc)
+            yield _json_line({"type": "error", "error": str(exc)})
+
+    return _event_stream()
+
+
+def _build_sources(
+    context_sections: List[Dict[str, Any]],
+    docs_by_hash: Dict[str, Any],
+    chunks_per_doc: Dict[str, int],
+) -> List[Dict[str, Any]]:
+    sources: List[Dict[str, Any]] = []
+    for entry in context_sections:
+        chunk = entry["chunk"]
+        doc_hash = chunk["doc_hash"]
+        doc = docs_by_hash.get(doc_hash, {})
+        total_chunks = chunks_per_doc.get(doc_hash, 0)
+        sources.append(
+            {
+                "chunk_id": chunk["chunk_id"],
+                "score": entry["score"],
+                "doc_hash": doc_hash,
+                "order_index": chunk["order_index"],
+                "document_name": doc.get("original_name", "unknown"),
+                "total_chunks": total_chunks,
+                "chunk_text": chunk.get("text", ""),
+                "chunk_text_preview": chunk.get("text", "")[:200],
+                "parser": chunk.get("parser", settings.ocr_parser_key),
+                "scale": chunk.get("scale"),
+            }
+        )
+    return sources
+
+
+async def _persist_conversation_turn(
+    conversation_id: str,
+    history_messages: List[Dict[str, str]],
+    question: str,
+    answer: str,
+    is_continuation: bool,
+) -> None:
+    if not is_continuation:
+        user_token_count = estimate_tokens(question, model=settings.llm_model)
+        await document_store.append_conversation_message(
+            conversation_id,
+            role="user",
+            content=question,
+            token_count=user_token_count,
+        )
+    assistant_token_count = estimate_tokens(answer, model=settings.llm_model)
+    await document_store.append_conversation_message(
+        conversation_id,
+        role="assistant",
+        content=answer,
+        token_count=assistant_token_count,
+    )
+
+    updated_history = list(history_messages)
+    if not is_continuation:
+        updated_history.append({"role": "user", "content": question})
+    updated_history.append({"role": "assistant", "content": answer})
+    summary_text = summarize_history(updated_history)
+    await document_store.update_conversation_summary(conversation_id, summary_text)
+
+
+def _json_line(payload: Dict[str, Any]) -> str:
+    return json.dumps(payload, separators=(",", ":")) + "\n"

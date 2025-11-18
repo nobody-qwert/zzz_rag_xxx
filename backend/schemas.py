@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 class AskRequest(BaseModel):
     query: Optional[str] = Field(default=None)
-    top_k: int = Field(10, ge=1, le=50)
+    top_k: int = Field(5, ge=1, le=50)
     conversation_id: Optional[str] = Field(default=None)
     continue_last: bool = Field(default=False)
 

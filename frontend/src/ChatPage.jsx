@@ -118,7 +118,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
   const systemDocs = useMemo(() => (Array.isArray(documents) ? documents : []), [documents]);
   const displayDocs = docs.length ? docs : systemDocs;
 
-  const api = { docs: "/api/documents", ask: "/api/ask" };
+  const api = { docs: "/api/documents", ask: "/api/ask", askStream: "/api/ask/stream" };
 
   const refreshDocs = async () => {
     setDocsLoading(true);
@@ -155,40 +155,121 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
     setExpandedSources({});
   };
 
+  const runStreamingCompletion = useCallback(
+    async ({ payload, targetMessageId, baseContent = "", baseSources = [] }) => {
+      const res = await fetch(api.askStream, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      if (!res.ok || !res.body) {
+        const data = await readJsonSafe(res);
+        throw new Error((data && (data.detail || data.error || data.raw)) || res.statusText || "Request failed");
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let accumulated = baseContent || "";
+      let finalMeta = null;
+      let mergedSources = Array.isArray(baseSources) ? baseSources : [];
+
+      const updateAssistant = (content) => {
+        setMessages((prev) =>
+          prev.map((msg) => {
+            if (msg.id !== targetMessageId) return msg;
+            return { ...msg, content };
+          }),
+        );
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const raw of lines) {
+          const line = raw.trim();
+          if (!line) continue;
+          let evt;
+          try {
+            evt = JSON.parse(line);
+          } catch {
+            continue;
+          }
+          if (evt.type === "token") {
+            const delta = evt.content ?? evt.token ?? "";
+            if (!delta) continue;
+            accumulated += delta;
+            updateAssistant(accumulated);
+          } else if (evt.type === "final") {
+            finalMeta = evt;
+            if (typeof evt.answer === "string") {
+              accumulated = evt.answer;
+              updateAssistant(accumulated);
+            }
+            mergedSources = mergeSources(mergedSources, evt.sources);
+          } else if (evt.type === "error") {
+            throw new Error(evt.error || "Streaming error");
+          }
+        }
+      }
+
+      const tail = buffer.trim();
+      if (tail) {
+        try {
+          const evt = JSON.parse(tail);
+          if (evt.type === "final") {
+            finalMeta = evt;
+            if (typeof evt.answer === "string") {
+              accumulated = evt.answer;
+              updateAssistant(accumulated);
+            }
+            mergedSources = mergeSources(mergedSources, evt.sources);
+          } else if (evt.type === "error") {
+            throw new Error(evt.error || "Streaming error");
+          }
+        } catch {
+          // Ignore trailing parse errors
+        }
+      }
+
+      if (!finalMeta) throw new Error("Stream ended without a final payload");
+      const nextConversationId = finalMeta.conversation_id || payload.conversation_id || conversationId;
+      if (nextConversationId) setConversationId(nextConversationId);
+      const needsFollowUp = !!finalMeta.needs_follow_up;
+      setMessages((prev) =>
+        prev.map((msg) => {
+          if (msg.id !== targetMessageId) return msg;
+          return {
+            ...msg,
+            content: accumulated,
+            sources: mergeSources(mergedSources, finalMeta.sources),
+            hideSources: needsFollowUp,
+            pendingFollowUp: needsFollowUp,
+            finishReason: finalMeta.finish_reason || null,
+          };
+        }),
+      );
+      setContextStats({
+        used: typeof finalMeta.context_tokens_used === "number" ? finalMeta.context_tokens_used : 0,
+        limit: typeof finalMeta.context_window_limit === "number" ? finalMeta.context_window_limit : defaultContextStats.limit,
+        truncated: !!finalMeta.context_truncated,
+        ratio: typeof finalMeta.context_usage === "number" ? finalMeta.context_usage : 0,
+      });
+      setPendingFollowUp(needsFollowUp ? { conversationId: nextConversationId, messageId: targetMessageId } : null);
+    },
+    [api.askStream, conversationId, defaultContextStats.limit],
+  );
+
   const handleAsk = async () => {
     const trimmed = query.trim();
     if (!trimmed || (warmingUp && !warmedUp) || pendingFollowUp || continuing) return;
     setAsking(true);
     const userId = createMessageId();
-    setMessages((prev) => [...prev, { id: userId, role: "user", content: trimmed }]);
+    const assistantId = createMessageId();
+    setMessages((prev) => [...prev, { id: userId, role: "user", content: trimmed }, { id: assistantId, role: "assistant", content: "" }]);
     setQuery("");
     try {
       const payload = { query: trimmed };
       if (conversationId) payload.conversation_id = conversationId;
-      const res = await fetch(api.ask, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-      const data = await readJsonSafe(res);
-      if (!res.ok) throw new Error((data && (data.detail || data.error || data.raw)) || res.statusText);
-      const nextConversationId = data?.conversation_id || conversationId;
-      if (nextConversationId) setConversationId(nextConversationId);
-      const needsFollowUp = !!data?.needs_follow_up;
-      const assistantId = createMessageId();
-      const assistantMessage = {
-        id: assistantId,
-        role: "assistant",
-        content: data?.answer || "",
-        sources: Array.isArray(data?.sources) ? data.sources : [],
-        hideSources: needsFollowUp,
-        pendingFollowUp: needsFollowUp,
-        finishReason: data?.finish_reason || null,
-      };
-      setMessages((prev) => [...prev, assistantMessage]);
-      setContextStats({
-        used: typeof data?.context_tokens_used === "number" ? data.context_tokens_used : 0,
-        limit: typeof data?.context_window_limit === "number" ? data.context_window_limit : defaultContextStats.limit,
-        truncated: !!data?.context_truncated,
-        ratio: typeof data?.context_usage === "number" ? data.context_usage : 0,
-      });
-      setPendingFollowUp(needsFollowUp ? { conversationId: nextConversationId, messageId: assistantId } : null);
+      await runStreamingCompletion({ payload, targetMessageId: assistantId });
     } catch (e) {
       setMessages((prev) => [...prev, { id: createMessageId(), role: "assistant", content: `Error: ${e.message || String(e)}`, error: true }]);
     } finally {
@@ -200,36 +281,16 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
     if (!pendingFollowUp || continuing) return;
     const activeConversationId = pendingFollowUp.conversationId || conversationId;
     if (!activeConversationId) return;
+    const existingAssistant = messages.find((m) => m.id === pendingFollowUp.messageId) || {};
     setContinuing(true);
     try {
       const payload = { continue_last: true, conversation_id: activeConversationId };
-      const res = await fetch(api.ask, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-      const data = await readJsonSafe(res);
-      if (!res.ok) throw new Error((data && (data.detail || data.error || data.raw)) || res.statusText);
-      const nextConversationId = data?.conversation_id || activeConversationId;
-      if (nextConversationId) setConversationId(nextConversationId);
-      const addition = data?.answer || "";
-      const needsFollowUp = !!data?.needs_follow_up;
-      setMessages((prev) => prev.map((msg) => {
-        if (msg.id !== pendingFollowUp.messageId) return msg;
-        const mergedSources = mergeSources(msg.sources, data?.sources);
-        const needsJoiner = Boolean(msg.content && addition && !msg.content.endsWith("\n") && !addition.startsWith("\n"));
-        return {
-          ...msg,
-          content: msg.content + (addition ? `${needsJoiner ? "\n" : ""}${addition}` : ""),
-          sources: mergedSources,
-          hideSources: needsFollowUp,
-          pendingFollowUp: needsFollowUp,
-          finishReason: data?.finish_reason || null,
-        };
-      }));
-      setContextStats({
-        used: typeof data?.context_tokens_used === "number" ? data.context_tokens_used : 0,
-        limit: typeof data?.context_window_limit === "number" ? data.context_window_limit : defaultContextStats.limit,
-        truncated: !!data?.context_truncated,
-        ratio: typeof data?.context_usage === "number" ? data.context_usage : 0,
+      await runStreamingCompletion({
+        payload,
+        targetMessageId: pendingFollowUp.messageId,
+        baseContent: existingAssistant.content || "",
+        baseSources: existingAssistant.sources || [],
       });
-      setPendingFollowUp(needsFollowUp ? { conversationId: nextConversationId, messageId: pendingFollowUp.messageId } : null);
     } catch (e) {
       setMessages((prev) => [...prev, { id: createMessageId(), role: "assistant", content: `Error continuing response: ${e.message || String(e)}`, error: true }]);
     } finally {
