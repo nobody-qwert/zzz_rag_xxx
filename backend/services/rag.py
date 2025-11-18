@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
@@ -219,6 +220,7 @@ async def ask_question(req: AskRequest) -> AskResponse:
     ]
 
     answer = ""
+    reasoning = ""
     finish_reason: Optional[str] = None
     if not context_sections:
         answer = settings.no_context_response
@@ -228,17 +230,36 @@ async def ask_question(req: AskRequest) -> AskResponse:
             from openai import AsyncOpenAI  # type: ignore
 
             client = AsyncOpenAI(base_url=settings.llm_base_url, api_key=settings.llm_api_key)
-            response = await client.chat.completions.create(
-                model=settings.llm_model,
-                messages=messages,
-                temperature=0.2,
-                max_tokens=settings.chat_completion_max_tokens,
-                stream=False,
-            )
+            if settings.llm_use_harmony:
+                harmony_prompt = _build_harmony_prompt(
+                    system_msg=settings.system_prompt,
+                    user_msg=f"{final_context_content}\n\nQuestion:\n{user_message_for_llm}",
+                )
+                completion_args = _build_completion_args(
+                    model=settings.llm_model,
+                    messages=[{"role": "user", "content": harmony_prompt}],
+                    temperature=settings.llm_temperature,
+                    max_tokens=settings.chat_completion_max_tokens,
+                    stop=_HARMONY_STOP,
+                )
+                response = await client.chat.completions.create(**completion_args)
+            else:
+                completion_args = _build_completion_args(
+                    model=settings.llm_model,
+                    messages=messages,
+                    temperature=settings.llm_temperature,
+                    max_tokens=settings.chat_completion_max_tokens,
+                )
+                response = await client.chat.completions.create(**completion_args)
             if not response.choices:
                 raise HTTPException(status_code=500, detail="LLM returned no choices")
             choice = response.choices[0]
-            answer = (choice.message.content or "").strip()
+            raw_answer = (choice.message.content or "").strip()
+            if settings.llm_use_harmony:
+                reasoning = _extract_harmony_reasoning(raw_answer)
+                answer = _extract_harmony_final(raw_answer)
+            else:
+                answer = raw_answer
             finish_reason = getattr(choice, "finish_reason", None)
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"LLM call failed: {exc}")
@@ -358,16 +379,16 @@ async def _generate_hyde_answer(question: str, history_summary: str) -> Optional
 
     client = AsyncOpenAI(base_url=settings.llm_base_url, api_key=settings.llm_api_key)
     try:
-        response = await client.chat.completions.create(
+        completion_args = _build_completion_args(
             model=settings.llm_model,
             messages=[
                 {"role": "system", "content": prompt_header},
                 {"role": "user", "content": user_prompt},
             ],
-            temperature=0.2,
+            temperature=settings.llm_temperature,
             max_tokens=max_tokens,
-            stream=False,
         )
+        response = await client.chat.completions.create(**completion_args)
     except Exception as exc:  # pragma: no cover - passthrough logging
         logger.debug("HyDE LLM call failed: %s", exc)
         return None
@@ -378,3 +399,67 @@ async def _generate_hyde_answer(question: str, history_summary: str) -> Optional
     content = getattr(choice, "message", None)
     answer_text = (getattr(content, "content", "") or "").strip()
     return answer_text or None
+
+
+_HARMONY_STOP = [
+    "<|end|>",
+    "<|start|>",
+    "<|assistant|>",
+    "<|analysis|>",
+    "<|channel|>",
+    "<|return|>",
+]
+
+
+def _build_harmony_prompt(system_msg: str, user_msg: str) -> str:
+    """Construct Harmony prompt structure for GPT-OSS style models."""
+    return (
+        f"<|start|>system<|message|>{system_msg}<|end|>"
+        f"<|start|>user<|message|>{user_msg}<|end|>"
+        f"<|start|>assistant<|channel|>final<|message|>"
+    )
+
+
+def _extract_harmony_reasoning(text: str) -> str:
+    match = re.search(r"<\|channel\|analysis<\|message\|>(.*?)<\|end\|>", text, flags=re.DOTALL)
+    return match.group(1).strip() if match else ""
+
+
+def _extract_harmony_final(text: str) -> str:
+    match = re.search(r"<\|channel\|final<\|message\|>(.*?)<\|return\|>", text, flags=re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    # Fallback: strip any tags if final block not found
+    return re.sub(r"<\|.*?\|>", "", text).strip()
+
+
+def _build_completion_args(
+    model: str,
+    messages: List[Dict[str, str]],
+    temperature: float,
+    max_tokens: int,
+    stop: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    args: Dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": False,
+    }
+    if stop:
+        args["stop"] = stop
+    # Native OpenAI params
+    if settings.llm_top_p is not None:
+        args["top_p"] = settings.llm_top_p
+    # Non-standard params (llama.cpp/OpenAI-compatible servers support these via extra_body)
+    extra_body: Dict[str, Any] = {}
+    if settings.llm_top_k is not None:
+        extra_body["top_k"] = settings.llm_top_k
+    if settings.llm_min_p is not None:
+        extra_body["min_p"] = settings.llm_min_p
+    if settings.llm_repeat_penalty is not None:
+        extra_body["repeat_penalty"] = settings.llm_repeat_penalty
+    if extra_body:
+        args["extra_body"] = extra_body
+    return args

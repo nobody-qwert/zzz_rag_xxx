@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Set, Tuple
+from typing import Optional, Set, Tuple
 
 
 @dataclass(frozen=True)
@@ -45,6 +45,12 @@ class AppSettings:
     llm_base_url: str
     llm_api_key: str
     llm_model: str
+    llm_use_harmony: bool
+    llm_temperature: float
+    llm_top_p: Optional[float]
+    llm_top_k: Optional[int]
+    llm_min_p: Optional[float]
+    llm_repeat_penalty: Optional[float]
     ocr_status_poll_interval: float
 
 
@@ -139,5 +145,29 @@ def load_settings() -> AppSettings:
         llm_base_url=_str_env("LLM_BASE_URL"),
         llm_api_key=_str_env("LLM_API_KEY"),
         llm_model=_str_env("LLM_MODEL", "default"),
+        llm_use_harmony=_str_env("LLM_USE_HARMONY", "false").lower() in {"1", "true", "yes", "on"},
+        llm_temperature=_float_env("LLM_TEMPERATURE", "0.2"),
+        llm_top_p=_optional_float_env("LLM_TOP_P"),
+        llm_top_k=_optional_int_env("LLM_TOP_K"),
+        llm_min_p=_optional_float_env("LLM_MIN_P"),
+        llm_repeat_penalty=_optional_float_env("LLM_REPEAT_PENALTY"),
         ocr_status_poll_interval=ocr_status_poll_interval,
     )
+def _optional_float_env(name: str) -> Optional[float]:
+    raw = os.environ.get(name)
+    if raw is None or str(raw).strip() == "":
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_int_env(name: str) -> Optional[int]:
+    raw = os.environ.get(name)
+    if raw is None or str(raw).strip() == "":
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
