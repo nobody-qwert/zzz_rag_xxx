@@ -1,7 +1,7 @@
 from __future__ import annotations
+
 import json
 import logging
-import re
 import time
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
@@ -347,7 +347,6 @@ async def ask_question(req: AskRequest) -> AskResponse:
     steps: List[Dict[str, Any]] = prepared.get("steps", [])
 
     answer = ""
-    reasoning = ""
     finish_reason: Optional[str] = None
     time_to_first_token: Optional[float] = None
     generation_seconds: Optional[float] = None
@@ -363,38 +362,20 @@ async def ask_question(req: AskRequest) -> AskResponse:
             from openai import AsyncOpenAI  # type: ignore
 
             client = AsyncOpenAI(base_url=settings.llm_base_url, api_key=settings.llm_api_key)
-            if settings.llm_use_harmony:
-                harmony_prompt = _build_harmony_prompt(
-                    system_msg=settings.system_prompt,
-                    user_msg=f"{final_context_content}\n\nQuestion:\n{user_message_for_llm}",
-                )
-                completion_args = _build_completion_args(
-                    model=settings.llm_model,
-                    messages=[{"role": "user", "content": harmony_prompt}],
-                    temperature=settings.llm_temperature,
-                    max_tokens=settings.chat_completion_max_tokens,
-                    stop=_HARMONY_STOP,
-                )
-                response = await client.chat.completions.create(**completion_args)
-            else:
-                completion_args = _build_completion_args(
-                    model=settings.llm_model,
-                    messages=messages,
-                    temperature=settings.llm_temperature,
-                    max_tokens=settings.chat_completion_max_tokens,
-                )
-                response = await client.chat.completions.create(**completion_args)
+            completion_args = _build_completion_args(
+                model=settings.llm_model,
+                messages=messages,
+                temperature=settings.llm_temperature,
+                max_tokens=settings.chat_completion_max_tokens,
+            )
+            response = await client.chat.completions.create(**completion_args)
             if not response.choices:
                 raise HTTPException(status_code=500, detail="LLM returned no choices")
             choice = response.choices[0]
             raw_answer = (choice.message.content or "").strip()
             time_to_first_token = time.perf_counter() - call_start
             generation_seconds = time_to_first_token
-            if settings.llm_use_harmony:
-                reasoning = _extract_harmony_reasoning(raw_answer)
-                answer = _extract_harmony_final(raw_answer)
-            else:
-                answer = raw_answer
+            answer = raw_answer
             finish_reason = getattr(choice, "finish_reason", None)
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"LLM call failed: {exc}")
@@ -522,44 +503,11 @@ async def _generate_hyde_answer(question: str, history_summary: str) -> Optional
     return answer_text or None
 
 
-_HARMONY_STOP = [
-    "<|end|>",
-    "<|start|>",
-    "<|assistant|>",
-    "<|analysis|>",
-    "<|channel|>",
-    "<|return|>",
-]
-
-
-def _build_harmony_prompt(system_msg: str, user_msg: str) -> str:
-    """Construct Harmony prompt structure for GPT-OSS style models."""
-    return (
-        f"<|start|>system<|message|>{system_msg}<|end|>"
-        f"<|start|>user<|message|>{user_msg}<|end|>"
-        f"<|start|>assistant<|channel|>final<|message|>"
-    )
-
-
-def _extract_harmony_reasoning(text: str) -> str:
-    match = re.search(r"<\|channel\|analysis<\|message\|>(.*?)<\|end\|>", text, flags=re.DOTALL)
-    return match.group(1).strip() if match else ""
-
-
-def _extract_harmony_final(text: str) -> str:
-    match = re.search(r"<\|channel\|final<\|message\|>(.*?)<\|return\|>", text, flags=re.DOTALL)
-    if match:
-        return match.group(1).strip()
-    # Fallback: strip any tags if final block not found
-    return re.sub(r"<\|.*?\|>", "", text).strip()
-
-
 def _build_completion_args(
     model: str,
     messages: List[Dict[str, str]],
     temperature: float,
     max_tokens: int,
-    stop: Optional[List[str]] = None,
     stream: bool = False,
 ) -> Dict[str, Any]:
     args: Dict[str, Any] = {
@@ -569,8 +517,6 @@ def _build_completion_args(
         "max_tokens": max_tokens,
         "stream": stream,
     }
-    if stop:
-        args["stop"] = stop
     # Native OpenAI params
     if settings.llm_top_p is not None:
         args["top_p"] = settings.llm_top_p
@@ -592,7 +538,6 @@ async def stream_question(req: AskRequest):
         steps: List[Dict[str, Any]] = []
         order = 0
         answer_parts: List[str] = []
-        reasoning = ""
         finish_reason: Optional[str] = None
         final_answer = ""
         time_to_first_token: Optional[float] = None
@@ -832,27 +777,13 @@ async def stream_question(req: AskRequest):
 
                 client = AsyncOpenAI(base_url=settings.llm_base_url, api_key=settings.llm_api_key)
                 yield _json_line({"type": "step", "step": {"name": "Main LLM", "kind": "llm", "order": order, "state": "started"}})
-                if settings.llm_use_harmony:
-                    harmony_prompt = _build_harmony_prompt(
-                        system_msg=settings.system_prompt,
-                        user_msg=f"{final_context_content}\n\nQuestion:\n{user_message_for_llm}",
-                    )
-                    completion_args = _build_completion_args(
-                        model=settings.llm_model,
-                        messages=[{"role": "user", "content": harmony_prompt}],
-                        temperature=settings.llm_temperature,
-                        max_tokens=settings.chat_completion_max_tokens,
-                        stop=_HARMONY_STOP,
-                        stream=True,
-                    )
-                else:
-                    completion_args = _build_completion_args(
-                        model=settings.llm_model,
-                        messages=messages,
-                        temperature=settings.llm_temperature,
-                        max_tokens=settings.chat_completion_max_tokens,
-                        stream=True,
-                    )
+                completion_args = _build_completion_args(
+                    model=settings.llm_model,
+                    messages=messages,
+                    temperature=settings.llm_temperature,
+                    max_tokens=settings.chat_completion_max_tokens,
+                    stream=True,
+                )
                 stream = await client.chat.completions.create(**completion_args)
                 async for chunk in stream:
                     choice = chunk.choices[0] if chunk.choices else None
@@ -872,11 +803,7 @@ async def stream_question(req: AskRequest):
                             time_to_first_token = time.perf_counter() - call_start
                         yield _json_line({"type": "token", "content": piece})
                 raw_answer = "".join(answer_parts).strip()
-                if settings.llm_use_harmony:
-                    reasoning = _extract_harmony_reasoning(raw_answer)
-                    final_answer = _extract_harmony_final(raw_answer)
-                else:
-                    final_answer = raw_answer
+                final_answer = raw_answer
 
             if not final_answer:
                 final_answer = "".join(answer_parts).strip()
@@ -922,8 +849,6 @@ async def stream_question(req: AskRequest):
                 "tokens_per_second": tokens_per_second,
                 "steps": steps,
             }
-            if reasoning:
-                payload["reasoning"] = reasoning
             yield _json_line(payload)
         except Exception as exc:
             logger.exception("Streaming ask failed: %s", exc)
