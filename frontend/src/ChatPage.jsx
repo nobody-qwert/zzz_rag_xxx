@@ -193,7 +193,6 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
       let accumulated = baseContent || "";
       let finalMeta = null;
       let mergedSources = Array.isArray(baseSources) ? baseSources : [];
-      const seenStepOrders = new Set();
       let assistantId = targetMessageId;
 
       const ensureAssistant = () => {
@@ -204,16 +203,26 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
         return newId;
       };
 
-      const addStepBubble = (content) => {
-        if (!content) return;
-        const sysId = createMessageId();
+      const upsertStepBubble = (stepInfo) => {
+        if (!stepInfo) return;
+        const key = stepInfo.order != null ? `order-${stepInfo.order}` : `${stepInfo.name || stepInfo.kind || "step"}-${stepInfo.kind || "unk"}`;
+        const contentLine =
+          stepInfo.state === "started"
+            ? `${stepInfo.name || stepInfo.kind || "step"} (in progress...)`
+            : formatSteps([stepInfo])[0] || stepInfo.name || stepInfo.kind || "step";
+        if (!contentLine) return;
         setMessages((prev) => {
           const next = [...prev];
           const anchorIdx = next.findIndex(
             (m) => m.id === anchorMessageId || m.id === targetMessageId || m.id === assistantId,
           );
           const insertionIdx = anchorIdx >= 0 ? anchorIdx + 1 : next.length;
-          next.splice(insertionIdx, 0, { id: sysId, role: "system", title: "Pipeline", content });
+          const existingIdx = next.findIndex((m) => m.stepKey === key);
+          if (existingIdx >= 0) {
+            next[existingIdx] = { ...next[existingIdx], content: contentLine, state: stepInfo.state };
+          } else {
+            next.splice(insertionIdx, 0, { id: createMessageId(), role: "system", title: "Pipeline", content: contentLine, stepKey: key, state: stepInfo.state });
+          }
           return next;
         });
       };
@@ -252,13 +261,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
             updateAssistant(accumulated);
           } else if (evt.type === "step") {
             const steps = Array.isArray(evt.step) ? evt.step : [evt.step];
-            steps.filter(Boolean).forEach((s) => {
-              const orderKey = s.order;
-              if (orderKey != null && seenStepOrders.has(orderKey)) return;
-              if (orderKey != null) seenStepOrders.add(orderKey);
-              const stepLines = formatSteps([s]);
-              stepLines.forEach((line) => addStepBubble(line));
-            });
+            steps.filter(Boolean).forEach((s) => upsertStepBubble(s));
           } else if (evt.type === "final") {
             finalMeta = evt;
             if (typeof evt.answer === "string") {
@@ -297,15 +300,8 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
       const needsFollowUp = !!finalMeta.needs_follow_up;
       const consolidatedSteps = Array.isArray(finalMeta.steps) ? finalMeta.steps : [];
       if (consolidatedSteps.length) {
-        const sortedSteps = consolidatedSteps
-          .slice()
-          .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-          .filter((s) => {
-            if (s.order != null && seenStepOrders.has(s.order)) return false;
-            if (s.order != null) seenStepOrders.add(s.order);
-            return true;
-          });
-        sortedSteps.forEach((s) => formatSteps([s]).forEach((line) => addStepBubble(line)));
+        const sortedSteps = consolidatedSteps.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+        sortedSteps.forEach((s) => upsertStepBubble(s));
       }
       setMessages((prev) =>
         prev.map((msg) => {

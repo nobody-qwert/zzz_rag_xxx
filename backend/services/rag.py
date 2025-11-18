@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -39,9 +40,34 @@ except ImportError:  # pragma: no cover
 logger = logging.getLogger(__name__)
 
 
-async def _prepare_question_payload(req: AskRequest) -> Dict[str, Any]:
+async def _prepare_question_payload(
+    req: AskRequest,
+    step_emitter: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """
+    Prepare the request and build retrieval context. When step_emitter is provided,
+    it will be awaited with dict events shaped like {"type":"step","step":{...}}
+    for started/done transitions.
+    """
     steps: List[Dict[str, Any]] = []
     step_counter = 0
+
+    async def _emit_step(
+        state: str,
+        name: str,
+        kind: str,
+        order: Optional[int] = None,
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if not step_emitter:
+            return
+        payload: Dict[str, Any] = {
+            "type": "step",
+            "step": {"name": name, "kind": kind, "order": step_counter if order is None else order, "state": state},
+        }
+        if extra:
+            payload["step"].update(extra)
+        await step_emitter(payload)
 
     def _record_step(name: str, kind: str, start: float, extra: Optional[Dict[str, Any]] = None) -> None:
         duration = max(0.0, time.perf_counter() - start)
@@ -90,24 +116,56 @@ async def _prepare_question_payload(req: AskRequest) -> Dict[str, Any]:
 
     emb_client = EmbeddingClient()
     embed_start = time.perf_counter()
+    await _emit_step("started", "Embed distilled query", "embedding", order=step_counter)
     distilled_vec = await _embed_query(distilled_query, emb_client)
     _record_step("Embed distilled query", "embedding", embed_start)
+    await _emit_step(
+        "done",
+        "Embed distilled query",
+        "embedding",
+        order=step_counter - 1,
+        extra={"duration_seconds": max(0.0, time.perf_counter() - embed_start)},
+    )
     if distilled_vec is None:
         raise HTTPException(status_code=500, detail="Failed to embed query")
 
     query_vec = distilled_vec
     try:
         hyde_start = time.perf_counter()
+        await _emit_step("started", "HyDE LLM", "llm", order=step_counter)
         hyde_text = await _generate_hyde_answer(question, history_summary)
         _record_step("HyDE LLM", "llm", hyde_start)
+        await _emit_step(
+            "done",
+            "HyDE LLM",
+            "llm",
+            order=step_counter - 1,
+            extra={"duration_seconds": max(0.0, time.perf_counter() - hyde_start)},
+        )
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.warning("HyDE generation raised an unexpected error: %s", exc)
+        await _emit_step(
+            "done",
+            "HyDE LLM",
+            "llm",
+            order=step_counter,
+            extra={"error": str(exc)},
+        )
+        step_counter += 1
         hyde_text = None
 
     if hyde_text:
         hyde_embed_start = time.perf_counter()
+        await _emit_step("started", "Embed HyDE answer", "embedding", order=step_counter)
         hyde_vec = await _embed_query(hyde_text, emb_client)
         _record_step("Embed HyDE answer", "embedding", hyde_embed_start)
+        await _emit_step(
+            "done",
+            "Embed HyDE answer",
+            "embedding",
+            order=step_counter - 1,
+            extra={"duration_seconds": max(0.0, time.perf_counter() - hyde_embed_start)},
+        )
         if hyde_vec is not None:
             try:
                 query_vec = (np.asarray(distilled_vec, dtype=np.float32) + np.asarray(hyde_vec, dtype=np.float32)) / 2.0
@@ -149,6 +207,7 @@ async def _prepare_question_payload(req: AskRequest) -> Dict[str, Any]:
 
     scored: List[Dict[str, Any]] = []
     retrieval_start = time.perf_counter()
+    await _emit_step("started", "Vector search", "retrieval", order=step_counter)
     for chunk in chunks:
         row = emb_by_id.get(chunk["chunk_id"])  # type: ignore[arg-type]
         if not row:
@@ -157,6 +216,16 @@ async def _prepare_question_payload(req: AskRequest) -> Dict[str, Any]:
         scored.append({"chunk": chunk, "score": score})
     scored.sort(key=lambda entry: entry["score"], reverse=True)
     _record_step("Vector search", "retrieval", retrieval_start)
+    await _emit_step(
+        "done",
+        "Vector search",
+        "retrieval",
+        order=step_counter - 1,
+        extra={
+            "duration_seconds": max(0.0, time.perf_counter() - retrieval_start),
+            "retrieved": len(scored),
+        },
+    )
 
     top_k = max(1, min(req.top_k, 20))
     filtered_sections = [entry for entry in scored if entry["score"] >= settings.min_context_similarity]
@@ -521,26 +590,57 @@ def _build_completion_args(
 
 
 async def stream_question(req: AskRequest):
-    prepared = await _prepare_question_payload(req)
-    is_continuation: bool = prepared["is_continuation"]
-    question: str = prepared["question"]
-    conversation_id: str = prepared["conversation_id"]
-    history_messages: List[Dict[str, str]] = prepared["history_messages"]
-    history_truncated: bool = prepared["history_truncated"]
-    context_sections: List[Dict[str, Any]] = prepared["context_sections"]
-    context_truncated: bool = prepared["context_truncated"]
-    context_tokens_used: int = prepared["context_tokens_used"]
-    context_usage_ratio: float = prepared["context_usage_ratio"]
-    docs_by_hash: Dict[str, Any] = prepared["docs_by_hash"]
-    chunks_per_doc: Dict[str, int] = prepared["chunks_per_doc"]
-    final_context_content: str = prepared["final_context_content"]
-    user_message_for_llm: str = prepared["user_message_for_llm"]
-    messages: List[Dict[str, str]] = prepared["messages"]
-    steps: List[Dict[str, Any]] = prepared.get("steps", [])
-
-    sources = _build_sources(context_sections, docs_by_hash, chunks_per_doc)
-
     async def _event_stream():
+        queue: "asyncio.Queue[Dict[str, Any]]" = asyncio.Queue()
+
+        async def step_emitter(evt: Dict[str, Any]) -> None:
+            await queue.put(evt)
+
+        prepared_task = asyncio.create_task(_prepare_question_payload(req, step_emitter=step_emitter))
+        prepared: Optional[Dict[str, Any]] = None
+        steps: List[Dict[str, Any]] = []
+        try:
+            while True:
+                if prepared_task.done():
+                    if prepared is None:
+                        prepared = await prepared_task
+                        steps = prepared.get("steps", [])
+                    try:
+                        evt = queue.get_nowait()
+                        yield _json_line(evt)
+                        continue
+                    except asyncio.QueueEmpty:
+                        break
+                try:
+                    evt = await asyncio.wait_for(queue.get(), timeout=0.05)
+                    yield _json_line(evt)
+                except asyncio.TimeoutError:
+                    continue
+        except Exception:
+            prepared_task.cancel()
+            raise
+
+        if prepared is None:
+            prepared = await prepared_task
+            steps = prepared.get("steps", [])
+
+        is_continuation: bool = prepared["is_continuation"]
+        question: str = prepared["question"]
+        conversation_id: str = prepared["conversation_id"]
+        history_messages: List[Dict[str, str]] = prepared["history_messages"]
+        history_truncated: bool = prepared["history_truncated"]
+        context_sections: List[Dict[str, Any]] = prepared["context_sections"]
+        context_truncated: bool = prepared["context_truncated"]
+        context_tokens_used: int = prepared["context_tokens_used"]
+        context_usage_ratio: float = prepared["context_usage_ratio"]
+        docs_by_hash: Dict[str, Any] = prepared["docs_by_hash"]
+        chunks_per_doc: Dict[str, int] = prepared["chunks_per_doc"]
+        final_context_content: str = prepared["final_context_content"]
+        user_message_for_llm: str = prepared["user_message_for_llm"]
+        messages: List[Dict[str, str]] = prepared["messages"]
+
+        sources = _build_sources(context_sections, docs_by_hash, chunks_per_doc)
+
         answer_parts: List[str] = []
         reasoning = ""
         finish_reason: Optional[str] = None
@@ -550,9 +650,6 @@ async def stream_question(req: AskRequest):
         generation_seconds: Optional[float] = None
         tokens_per_second: Optional[float] = None
         try:
-            for step in steps:
-                yield _json_line({"type": "step", "step": step})
-
             if not context_sections:
                 final_answer = settings.no_context_response
                 finish_reason = "no_context"
@@ -563,6 +660,7 @@ async def stream_question(req: AskRequest):
                 from openai import AsyncOpenAI  # type: ignore
 
                 client = AsyncOpenAI(base_url=settings.llm_base_url, api_key=settings.llm_api_key)
+                yield _json_line({"type": "step", "step": {"name": "Main LLM", "kind": "llm", "state": "started", "order": len(steps)}})
                 if settings.llm_use_harmony:
                     harmony_prompt = _build_harmony_prompt(
                         system_msg=settings.system_prompt,
@@ -625,7 +723,15 @@ async def stream_question(req: AskRequest):
                     "order": len(steps),
                 }
             )
-            yield _json_line({"type": "step", "step": steps[-1]})
+            yield _json_line(
+                {
+                    "type": "step",
+                    "step": {
+                        **steps[-1],
+                        "state": "done",
+                    },
+                }
+            )
             needs_follow_up = finish_reason not in (None, "stop")
             await _persist_conversation_turn(
                 conversation_id=conversation_id,
