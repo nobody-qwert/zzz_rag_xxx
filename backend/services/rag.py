@@ -1,6 +1,4 @@
 from __future__ import annotations
-
-import asyncio
 import json
 import logging
 import re
@@ -591,65 +589,238 @@ def _build_completion_args(
 
 async def stream_question(req: AskRequest):
     async def _event_stream():
-        queue: "asyncio.Queue[Dict[str, Any]]" = asyncio.Queue()
-
-        async def step_emitter(evt: Dict[str, Any]) -> None:
-            await queue.put(evt)
-
-        prepared_task = asyncio.create_task(_prepare_question_payload(req, step_emitter=step_emitter))
-        prepared: Optional[Dict[str, Any]] = None
         steps: List[Dict[str, Any]] = []
-        try:
-            while True:
-                if prepared_task.done():
-                    if prepared is None:
-                        prepared = await prepared_task
-                        steps = prepared.get("steps", [])
-                    try:
-                        evt = queue.get_nowait()
-                        yield _json_line(evt)
-                        continue
-                    except asyncio.QueueEmpty:
-                        break
-                try:
-                    evt = await asyncio.wait_for(queue.get(), timeout=0.05)
-                    yield _json_line(evt)
-                except asyncio.TimeoutError:
-                    continue
-        except Exception:
-            prepared_task.cancel()
-            raise
-
-        if prepared is None:
-            prepared = await prepared_task
-            steps = prepared.get("steps", [])
-
-        is_continuation: bool = prepared["is_continuation"]
-        question: str = prepared["question"]
-        conversation_id: str = prepared["conversation_id"]
-        history_messages: List[Dict[str, str]] = prepared["history_messages"]
-        history_truncated: bool = prepared["history_truncated"]
-        context_sections: List[Dict[str, Any]] = prepared["context_sections"]
-        context_truncated: bool = prepared["context_truncated"]
-        context_tokens_used: int = prepared["context_tokens_used"]
-        context_usage_ratio: float = prepared["context_usage_ratio"]
-        docs_by_hash: Dict[str, Any] = prepared["docs_by_hash"]
-        chunks_per_doc: Dict[str, int] = prepared["chunks_per_doc"]
-        final_context_content: str = prepared["final_context_content"]
-        user_message_for_llm: str = prepared["user_message_for_llm"]
-        messages: List[Dict[str, str]] = prepared["messages"]
-
-        sources = _build_sources(context_sections, docs_by_hash, chunks_per_doc)
-
+        order = 0
         answer_parts: List[str] = []
         reasoning = ""
         finish_reason: Optional[str] = None
         final_answer = ""
-        call_start = time.perf_counter()
         time_to_first_token: Optional[float] = None
         generation_seconds: Optional[float] = None
         tokens_per_second: Optional[float] = None
+
         try:
+            is_continuation = bool(req.continue_last)
+            raw_query = (req.query or "").strip()
+            if not is_continuation and not raw_query:
+                raise HTTPException(status_code=400, detail="Query must not be empty")
+            if is_continuation and not (req.conversation_id or "").strip():
+                raise HTTPException(status_code=400, detail="conversation_id is required to continue a response")
+
+            processed = await document_store.count_documents(status="processed")
+            if processed == 0:
+                raise HTTPException(status_code=400, detail="No processed documents yet")
+
+            conversation_id = (req.conversation_id or "").strip() or str(uuid4())
+            existing_conversation = await document_store.get_conversation(conversation_id)
+            if not existing_conversation:
+                await document_store.create_conversation(conversation_id)
+
+            history_rows = await document_store.fetch_conversation_messages(conversation_id)
+            history_messages = [{"role": row["role"], "content": row["content"]} for row in history_rows]
+
+            if is_continuation:
+                last_user_message: Optional[Dict[str, str]] = None
+                for entry in reversed(history_messages):
+                    if (entry.get("role") or "").lower() == "user":
+                        last_user_message = entry
+                        break
+                if not last_user_message:
+                    raise HTTPException(status_code=400, detail="Cannot continue because no prior user question was found")
+                question = (last_user_message.get("content") or "").strip()
+                if not question:
+                    raise HTTPException(status_code=400, detail="Last user question is empty; cannot continue")
+            else:
+                question = raw_query
+
+            history_summary = summarize_history(history_messages)
+            distilled_query = build_distilled_query(history_summary, question)
+
+            emb_client = EmbeddingClient()
+
+            # Step 1: embed distilled query
+            embed_start = time.perf_counter()
+            yield _json_line({"type": "step", "step": {"name": "Embed distilled query", "kind": "embedding", "order": order, "state": "started"}})
+            distilled_vec = await _embed_query(distilled_query, emb_client)
+            if distilled_vec is None:
+                raise HTTPException(status_code=500, detail="Failed to embed query")
+            duration = max(0.0, time.perf_counter() - embed_start)
+            steps.append({"name": "Embed distilled query", "kind": "embedding", "duration_seconds": duration, "order": order})
+            yield _json_line({"type": "step", "step": {**steps[-1], "state": "done"}})
+            order += 1
+
+            # Step 2: HyDE LLM
+            hyde_text: Optional[str]
+            try:
+                hyde_start = time.perf_counter()
+                yield _json_line({"type": "step", "step": {"name": "HyDE LLM", "kind": "llm", "order": order, "state": "started"}})
+                hyde_text = await _generate_hyde_answer(question, history_summary)
+                duration = max(0.0, time.perf_counter() - hyde_start)
+                steps.append({"name": "HyDE LLM", "kind": "llm", "duration_seconds": duration, "order": order})
+                yield _json_line({"type": "step", "step": {**steps[-1], "state": "done"}})
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.warning("HyDE generation raised an unexpected error: %s", exc)
+                duration = max(0.0, time.perf_counter() - hyde_start)
+                steps.append({"name": "HyDE LLM", "kind": "llm", "duration_seconds": duration, "order": order, "error": str(exc)})
+                yield _json_line({"type": "step", "step": {**steps[-1], "state": "done"}})
+                hyde_text = None
+            order += 1
+
+            # Step 3: embed HyDE answer (if available)
+            if hyde_text:
+                hyde_embed_start = time.perf_counter()
+                yield _json_line({"type": "step", "step": {"name": "Embed HyDE answer", "kind": "embedding", "order": order, "state": "started"}})
+                hyde_vec = await _embed_query(hyde_text, emb_client)
+                duration = max(0.0, time.perf_counter() - hyde_embed_start)
+                steps.append({"name": "Embed HyDE answer", "kind": "embedding", "duration_seconds": duration, "order": order})
+                yield _json_line({"type": "step", "step": {**steps[-1], "state": "done"}})
+                order += 1
+                if hyde_vec is not None:
+                    try:
+                        query_vec = (np.asarray(distilled_vec, dtype=np.float32) + np.asarray(hyde_vec, dtype=np.float32)) / 2.0
+                    except Exception as exc:  # pragma: no cover - fallback
+                        logger.warning("HyDE vector blend failed: %s", exc)
+                        query_vec = distilled_vec
+                else:
+                    query_vec = distilled_vec
+            else:
+                query_vec = distilled_vec
+
+            # Step 4: vector search
+            parser_specs: List[Dict[str, str]] = [{"config_id": settings.chunk_config_small_id, "scale": "small"}]
+            if settings.chunk_config_large_id and settings.chunk_config_large_id != settings.chunk_config_small_id:
+                parser_specs.append({"config_id": settings.chunk_config_large_id, "scale": "large"})
+
+            chunks: List[Dict[str, Any]] = []
+            for spec in parser_specs:
+                config_id = spec["config_id"]
+                scale = spec["scale"]
+                parser_chunks = await document_store.fetch_chunks(chunk_config_id=config_id)
+                for chunk in parser_chunks:
+                    chunk_copy = dict(chunk)
+                    chunk_copy["chunk_config_id"] = config_id
+                    chunk_copy["scale"] = scale
+                    chunks.append(chunk_copy)
+
+            chunk_ids = [chunk["chunk_id"] for chunk in chunks]
+            emb_rows = await document_store.fetch_embeddings_for_chunks(chunk_ids)
+            emb_by_id = {row.chunk_id: row for row in emb_rows}
+
+            docs = await document_store.list_documents()
+            docs_by_hash = {doc["doc_hash"]: doc for doc in docs}
+
+            chunks_per_doc: Dict[str, int] = {}
+            for chunk in chunks:
+                doc_hash = chunk["doc_hash"]
+                chunks_per_doc[doc_hash] = chunks_per_doc.get(doc_hash, 0) + 1
+
+            scored: List[Dict[str, Any]] = []
+            retrieval_start = time.perf_counter()
+            yield _json_line({"type": "step", "step": {"name": "Vector search", "kind": "retrieval", "order": order, "state": "started"}})
+            for chunk in chunks:
+                row = emb_by_id.get(chunk["chunk_id"])  # type: ignore[arg-type]
+                if not row:
+                    continue
+                score = cosine_similarity(row.vector, query_vec)
+                scored.append({"chunk": chunk, "score": score})
+            scored.sort(key=lambda entry: entry["score"], reverse=True)
+            duration = max(0.0, time.perf_counter() - retrieval_start)
+            steps.append({"name": "Vector search", "kind": "retrieval", "duration_seconds": duration, "order": order, "retrieved": len(scored)})
+            yield _json_line({"type": "step", "step": {**steps[-1], "state": "done"}})
+            order += 1
+
+            top_k = max(1, min(req.top_k, 20))
+            filtered_sections = [entry for entry in scored if entry["score"] >= settings.min_context_similarity]
+            context_sections = filtered_sections[:top_k]
+
+            if not settings.llm_base_url or not settings.llm_api_key:
+                raise HTTPException(status_code=500, detail="LLM_BASE_URL and LLM_API_KEY must be set")
+
+            prompt_token_limit = min(
+                max(512, settings.chat_context_window - settings.chat_completion_reserve),
+                settings.chat_context_window - 16,
+            )
+            if prompt_token_limit <= 0:
+                raise HTTPException(status_code=500, detail="Context window too small for configured reserve")
+
+            trimmed_history, history_truncated, _ = trim_history_for_budget(
+                history_messages,
+                model=settings.llm_model,
+                token_limit=prompt_token_limit,
+                system_prompt=settings.system_prompt,
+            )
+
+            history_for_prompt = list(trimmed_history)
+            user_message_for_llm = (
+                f"{settings.continue_prompt}\n\nOriginal question: {question}"
+                if is_continuation
+                else question
+            )
+            context_truncated = False
+
+            # Optional: Build prompt step
+            build_prompt_start = time.perf_counter()
+            yield _json_line({"type": "step", "step": {"name": "Build prompt", "kind": "prompt", "order": order, "state": "started"}})
+
+            while True:
+                context_text = render_context(context_sections)
+                context_content = (
+                    "Use only the following retrieved document snippets as context. "
+                    "Cite them as [source N].\n"
+                    + (context_text if context_text else "(No retrieved snippets available.)")
+                )
+                combined_user_message = f"{context_content}\n\nQuestion:\n{user_message_for_llm}"
+                messages = [
+                    {"role": "system", "content": settings.system_prompt},
+                    *history_for_prompt,
+                    {"role": "user", "content": combined_user_message},
+                ]
+                prompt_tokens = _estimate_prompt_tokens(messages)
+                if prompt_tokens <= prompt_token_limit:
+                    break
+                if history_for_prompt:
+                    history_for_prompt.pop(0)
+                    history_truncated = True
+                    continue
+                if context_sections:
+                    context_sections.pop()
+                    context_truncated = True
+                    continue
+                without_user = messages[:-1]
+                remaining = prompt_token_limit - _estimate_prompt_tokens(without_user)
+                if remaining <= 0:
+                    raise HTTPException(status_code=500, detail="Prompt exceeds available context even after trimming")
+                truncated = truncate_text_to_tokens(question, remaining, model=settings.llm_model)
+                if not truncated:
+                    truncated = question[:200]
+                if truncated == user_message_for_llm:
+                    raise HTTPException(status_code=500, detail="Unable to fit prompt within context window")
+                user_message_for_llm = truncated
+                context_truncated = True
+            context_tokens_used = prompt_tokens
+            context_usage_ratio = min(1.0, context_tokens_used / float(settings.chat_context_window))
+
+            final_context_text = render_context(context_sections)
+            final_context_content = (
+                "Use only the following retrieved document snippets as context. "
+                "Cite them as [source N].\n"
+                + (final_context_text if final_context_text else "(No retrieved snippets available.)")
+            )
+            messages = [
+                {"role": "system", "content": settings.system_prompt},
+                *history_for_prompt,
+                {"role": "user", "content": f"{final_context_content}\n\nQuestion:\n{user_message_for_llm}"},
+            ]
+
+            prompt_build_duration = max(0.0, time.perf_counter() - build_prompt_start)
+            steps.append({"name": "Build prompt", "kind": "prompt", "duration_seconds": prompt_build_duration, "order": order})
+            yield _json_line({"type": "step", "step": {**steps[-1], "state": "done"}})
+            order += 1
+
+            sources = _build_sources(context_sections, docs_by_hash, chunks_per_doc)
+
+            call_start = time.perf_counter()
+
             if not context_sections:
                 final_answer = settings.no_context_response
                 finish_reason = "no_context"
@@ -660,7 +831,7 @@ async def stream_question(req: AskRequest):
                 from openai import AsyncOpenAI  # type: ignore
 
                 client = AsyncOpenAI(base_url=settings.llm_base_url, api_key=settings.llm_api_key)
-                yield _json_line({"type": "step", "step": {"name": "Main LLM", "kind": "llm", "state": "started", "order": len(steps)}})
+                yield _json_line({"type": "step", "step": {"name": "Main LLM", "kind": "llm", "order": order, "state": "started"}})
                 if settings.llm_use_harmony:
                     harmony_prompt = _build_harmony_prompt(
                         system_msg=settings.system_prompt,
@@ -706,6 +877,7 @@ async def stream_question(req: AskRequest):
                     final_answer = _extract_harmony_final(raw_answer)
                 else:
                     final_answer = raw_answer
+
             if not final_answer:
                 final_answer = "".join(answer_parts).strip()
             total_time = time.perf_counter() - call_start
@@ -720,18 +892,12 @@ async def stream_question(req: AskRequest):
                     "duration_seconds": generation_seconds,
                     "time_to_first_token_seconds": time_to_first_token,
                     "tokens_per_second": tokens_per_second,
-                    "order": len(steps),
+                    "order": order,
                 }
             )
-            yield _json_line(
-                {
-                    "type": "step",
-                    "step": {
-                        **steps[-1],
-                        "state": "done",
-                    },
-                }
-            )
+            yield _json_line({"type": "step", "step": {**steps[-1], "state": "done"}})
+            order += 1
+
             needs_follow_up = finish_reason not in (None, "stop")
             await _persist_conversation_turn(
                 conversation_id=conversation_id,
