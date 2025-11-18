@@ -84,15 +84,10 @@ def load_settings() -> AppSettings:
     large_chunk_right_overlap = _int_env("LARGE_CHUNK_RIGHT_OVERLAP", "100")
     ocr_status_poll_interval = _float_env("OCR_STATUS_POLL_INTERVAL", "5")
 
-    small_chunk_config_id = _str_env("SMALL_CHUNK_CONFIG_ID", "chunk-small")
-    small_chunk_config_label = _str_env("SMALL_CHUNK_CONFIG_NAME", "Small window") or "Small window"
-    large_chunk_config_id = _str_env("LARGE_CHUNK_CONFIG_ID", "chunk-large")
-    large_chunk_config_label = _str_env("LARGE_CHUNK_CONFIG_NAME", "Large window") or "Large window"
-
     chunking_configs: Tuple[ChunkingConfigSpec, ...] = (
         ChunkingConfigSpec(
-            config_id=small_chunk_config_id,
-            label=small_chunk_config_label,
+            config_id="chunk-small",
+            label="Small window",
             description="Primary retrieval window",
             core_size=chunk_size,
             left_overlap=chunk_overlap,
@@ -100,8 +95,8 @@ def load_settings() -> AppSettings:
             step_size=chunk_size,
         ),
         ChunkingConfigSpec(
-            config_id=large_chunk_config_id,
-            label=large_chunk_config_label,
+            config_id="chunk-large",
+            label="Large window",
             description="Secondary large context window",
             core_size=large_chunk_size,
             left_overlap=large_chunk_left_overlap,
@@ -138,8 +133,8 @@ def load_settings() -> AppSettings:
         large_chunk_size=large_chunk_size,
         large_chunk_left_overlap=large_chunk_left_overlap,
         large_chunk_right_overlap=large_chunk_right_overlap,
-        chunk_config_small_id=small_chunk_config_id,
-        chunk_config_large_id=large_chunk_config_id,
+        chunk_config_small_id="chunk-small",
+        chunk_config_large_id="chunk-large",
         chunking_configs=chunking_configs,
         llm_base_url=_str_env("LLM_BASE_URL"),
         llm_api_key=_str_env("LLM_API_KEY"),
