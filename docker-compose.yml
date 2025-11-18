@@ -75,6 +75,7 @@ services:
       --port 8000
       --chat_format chatml
       --n_ctx ${CHAT_CONTEXT_SIZE:-20000}
+      --flash_attn true
       --n_gpu_layers -1
       --use_mlock true
       --api_key ${LLM_API_KEY:-local-llm}
