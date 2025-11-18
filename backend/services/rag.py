@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
@@ -259,9 +260,15 @@ async def ask_question(req: AskRequest) -> AskResponse:
     answer = ""
     reasoning = ""
     finish_reason: Optional[str] = None
+    time_to_first_token: Optional[float] = None
+    generation_seconds: Optional[float] = None
+    tokens_per_second: Optional[float] = None
+    call_start = time.perf_counter()
     if not context_sections:
         answer = settings.no_context_response
         finish_reason = "no_context"
+        time_to_first_token = time.perf_counter() - call_start
+        generation_seconds = time_to_first_token
     else:
         try:
             from openai import AsyncOpenAI  # type: ignore
@@ -292,6 +299,8 @@ async def ask_question(req: AskRequest) -> AskResponse:
                 raise HTTPException(status_code=500, detail="LLM returned no choices")
             choice = response.choices[0]
             raw_answer = (choice.message.content or "").strip()
+            time_to_first_token = time.perf_counter() - call_start
+            generation_seconds = time_to_first_token
             if settings.llm_use_harmony:
                 reasoning = _extract_harmony_reasoning(raw_answer)
                 answer = _extract_harmony_final(raw_answer)
@@ -311,6 +320,12 @@ async def ask_question(req: AskRequest) -> AskResponse:
         is_continuation=is_continuation,
     )
 
+    token_count = estimate_tokens(answer, model=settings.llm_model)
+    if generation_seconds is None:
+        generation_seconds = 0.0
+    tokens_per_second = token_count / max(generation_seconds, 1e-6) if token_count and generation_seconds is not None else None
+    time_to_first_token = time_to_first_token or generation_seconds
+
     needs_follow_up = finish_reason not in (None, "stop")
 
     return AskResponse(
@@ -323,6 +338,9 @@ async def ask_question(req: AskRequest) -> AskResponse:
         context_truncated=(history_truncated or context_truncated),
         finish_reason=finish_reason,
         needs_follow_up=needs_follow_up,
+        time_to_first_token_seconds=time_to_first_token,
+        generation_seconds=generation_seconds,
+        tokens_per_second=tokens_per_second,
     )
 
 
@@ -493,10 +511,16 @@ async def stream_question(req: AskRequest):
         reasoning = ""
         finish_reason: Optional[str] = None
         final_answer = ""
+        call_start = time.perf_counter()
+        time_to_first_token: Optional[float] = None
+        generation_seconds: Optional[float] = None
+        tokens_per_second: Optional[float] = None
         try:
             if not context_sections:
                 final_answer = settings.no_context_response
                 finish_reason = "no_context"
+                time_to_first_token = time.perf_counter() - call_start
+                generation_seconds = time_to_first_token
                 yield _json_line({"type": "token", "content": final_answer})
             else:
                 from openai import AsyncOpenAI  # type: ignore
@@ -538,6 +562,8 @@ async def stream_question(req: AskRequest):
                         piece = getattr(message_obj, "content", None) or ""
                     if piece:
                         answer_parts.append(piece)
+                        if time_to_first_token is None:
+                            time_to_first_token = time.perf_counter() - call_start
                         yield _json_line({"type": "token", "content": piece})
                 raw_answer = "".join(answer_parts).strip()
                 if settings.llm_use_harmony:
@@ -547,6 +573,11 @@ async def stream_question(req: AskRequest):
                     final_answer = raw_answer
             if not final_answer:
                 final_answer = "".join(answer_parts).strip()
+            total_time = time.perf_counter() - call_start
+            time_to_first_token = time_to_first_token or total_time
+            generation_seconds = max(0.0, total_time - time_to_first_token)
+            token_count = estimate_tokens(final_answer, model=settings.llm_model)
+            tokens_per_second = token_count / max(generation_seconds, 1e-6) if generation_seconds is not None else None
             needs_follow_up = finish_reason not in (None, "stop")
             await _persist_conversation_turn(
                 conversation_id=conversation_id,
@@ -566,6 +597,9 @@ async def stream_question(req: AskRequest):
                 "context_truncated": history_truncated or context_truncated,
                 "finish_reason": finish_reason,
                 "needs_follow_up": needs_follow_up,
+                "time_to_first_token_seconds": time_to_first_token,
+                "generation_seconds": generation_seconds,
+                "tokens_per_second": tokens_per_second,
             }
             if reasoning:
                 payload["reasoning"] = reasoning

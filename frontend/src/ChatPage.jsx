@@ -32,6 +32,14 @@ function mergeSources(existing = [], incoming = []) {
   });
   return Array.from(deduped.values());
 }
+function formatTiming(t) {
+  if (!t) return "";
+  const parts = [];
+  if (typeof t.timeToFirst === "number") parts.push(`TTFT ${t.timeToFirst.toFixed(2)}s`);
+  if (typeof t.generationSeconds === "number") parts.push(`Gen ${t.generationSeconds.toFixed(2)}s`);
+  if (typeof t.tokensPerSecond === "number") parts.push(`${t.tokensPerSecond.toFixed(1)} tok/s`);
+  return parts.join(" · ");
+}
 
 const styles = {
   page: { display: "flex", flexWrap: "wrap", gap: 18, alignItems: "stretch", width: "100%", height: "calc(100vh - 32px)", maxHeight: "calc(100vh - 32px)", overflow: "hidden" },
@@ -244,6 +252,11 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
             hideSources: needsFollowUp,
             pendingFollowUp: needsFollowUp,
             finishReason: finalMeta.finish_reason || null,
+            timing: {
+              timeToFirst: finalMeta.time_to_first_token_seconds,
+              generationSeconds: finalMeta.generation_seconds,
+              tokensPerSecond: finalMeta.tokens_per_second,
+            },
           };
         }),
       );
@@ -369,6 +382,11 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
                   )}
                   {m.role === "assistant" && m.aborted && !m.error && (
                     <div style={{ ...styles.muted, marginTop: 8 }}>Generation aborted. You can ask another question.</div>
+                  )}
+                  {m.role === "assistant" && m.timing && (
+                    <div style={{ ...styles.muted, marginTop: 8, fontSize: 12 }}>
+                      {formatTiming(m.timing)}
+                    </div>
                   )}
                   {m.role === "assistant" && Array.isArray(m.sources) && m.sources.length > 0 && !m.hideSources && (
                     <div style={styles.sourcesBlock}>

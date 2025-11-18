@@ -22,3 +22,6 @@ class AskResponse(BaseModel):
     context_truncated: bool
     finish_reason: Optional[str] = Field(default=None)
     needs_follow_up: bool = Field(default=False)
+    time_to_first_token_seconds: Optional[float] = Field(default=None)
+    generation_seconds: Optional[float] = Field(default=None)
+    tokens_per_second: Optional[float] = Field(default=None)
