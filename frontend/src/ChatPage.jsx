@@ -18,10 +18,7 @@ async function readJsonSafe(res) {
   return { nonJson: true, raw };
 }
 
-function prettyBytes(n) { if (n == null || isNaN(n)) return "-"; const u=["B","KB","MB","GB","TB"]; let i=0,v=n; while(v>=1024&&i<u.length-1){v/=1024;i++;} return `${v.toFixed(v<10&&i>0?1:0)} ${u[i]}`; }
-function shortHash(h){ return (h||"").slice(0,8); }
 const createMessageId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-function truncateName(name, max = 80) { if (typeof name !== "string") return ""; return name.length > max ? `${name.slice(0, max - 3)}...` : name; }
 function mergeSources(existing = [], incoming = []) {
   const base = Array.isArray(existing) ? existing : [];
   const extra = Array.isArray(incoming) ? incoming : [];
@@ -60,12 +57,31 @@ function formatSteps(steps = []) {
 }
 
 const styles = {
-  page: { display: "flex", flexWrap: "wrap", gap: 18, alignItems: "stretch", width: "100%", height: "calc(100vh - 32px)", maxHeight: "calc(100vh - 32px)", overflow: "hidden" },
-  chatCard: { flex: "2 1 540px", border: "none", borderRadius: 24, padding: "22px 24px", background: "linear-gradient(145deg, rgba(63, 76, 149, 0.98), rgba(22, 26, 55, 0.95))", boxShadow: "0 36px 72px rgba(5, 8, 25, 0.78)", display: "flex", flexDirection: "column", gap: 16, minHeight: 0, maxHeight: "100%", overflow: "hidden" },
-  sideCard: { flex: "1 1 320px", border: "none", borderRadius: 24, padding: "22px 22px", background: "linear-gradient(160deg, rgba(55, 68, 138, 0.97), rgba(18, 22, 48, 0.94))", boxShadow: "0 32px 64px rgba(5, 8, 25, 0.72)", display: "grid", gridTemplateRows: "auto auto 1fr", gap: 16, alignContent: "stretch", minHeight: 0, maxHeight: "100%", overflow: "hidden" },
+  page: {
+    display: "flex",
+    justifyContent: "center",
+    width: "100%",
+    height: "calc(100vh - 32px)",
+    maxHeight: "calc(100vh - 32px)",
+    overflow: "hidden",
+  },
+  chatCard: {
+    flex: "1 1 100%",
+    width: "100%",
+    border: "none",
+    borderRadius: 24,
+    padding: "22px 24px",
+    background: "linear-gradient(145deg, rgba(63, 76, 149, 0.98), rgba(22, 26, 55, 0.95))",
+    boxShadow: "0 36px 72px rgba(5, 8, 25, 0.78)",
+    display: "flex",
+    flexDirection: "column",
+    gap: 16,
+    minHeight: 0,
+    maxHeight: "100%",
+    overflow: "hidden",
+  },
   sectionHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" },
   sectionTitle: { margin: 0, fontSize: 20, fontWeight: 600, letterSpacing: 0.25, color: "#ffffff" },
-  badge: { padding: "6px 12px", borderRadius: 999, border: "1px solid rgba(255, 255, 255, 0.6)", fontSize: 12, color: "#ffffff", whiteSpace: "nowrap" },
   button: { font: "inherit", fontSize: 14, padding: "10px 22px", borderRadius: 999, border: "none", background: "linear-gradient(135deg, rgba(139, 92, 246, 0.92), rgba(59, 130, 246, 0.78))", color: "#ffffff", cursor: "pointer", boxShadow: "0 20px 40px rgba(8, 12, 32, 0.65)", transition: "transform 0.15s ease, box-shadow 0.15s ease" },
   subtleButton: { font: "inherit", fontSize: 13, padding: "8px 18px", borderRadius: 999, border: "none", background: "rgba(66, 77, 124, 0.96)", color: "#fdfdff", cursor: "pointer", boxShadow: "0 16px 30px rgba(6, 9, 25, 0.65)", transition: "transform 0.15s ease, box-shadow 0.15s ease" },
   input: { font: "inherit", padding: "12px 22px", borderRadius: 999, border: "none", background: "rgba(21, 26, 54, 0.98)", color: "#ffffff", flex: 1, minWidth: 0, boxShadow: "0 0 0 2px rgba(59, 130, 246, 0.3), inset 0 2px 14px rgba(3, 6, 18, 0.7)", outline: "none" },
@@ -114,9 +130,6 @@ const styles = {
   tableCell: { border: "1px solid rgba(148, 163, 184, 0.18)", padding: "8px 10px", textAlign: "left" },
   inlineCode: { background: "rgba(15, 23, 42, 0.6)", borderRadius: 8, padding: "2px 6px", fontSize: 13, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace' },
   codeBlock: { background: "rgba(15, 23, 42, 0.75)", borderRadius: 16, padding: "14px 16px", margin: "12px 0", overflowX: "auto", fontSize: 13, border: "1px solid rgba(148, 163, 184, 0.25)" },
-  docs: { overflow: "auto", border: "none", borderRadius: 24, padding: 18, background: "rgba(19, 24, 54, 0.97)", boxShadow: "0 20px 40px rgba(0, 0, 0, 0.58), inset 0 0 0 2px rgba(99, 102, 241, 0.1)", color: "#ffffff", minHeight: 0, maxHeight: "100%", height: "100%" },
-  listItem: { padding: "14px 12px", borderRadius: 18, marginBottom: 12, background: "rgba(47, 58, 118, 0.95)", boxShadow: "0 14px 26px rgba(2, 6, 19, 0.62)", color: "#ffffff" },
-  docTitle: { display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "normal", lineHeight: 1.35, maxWidth: "100%" },
   contextBadge: { padding: "8px 14px", borderRadius: 14, border: "1px solid rgba(255, 255, 255, 0.6)", fontSize: 12, color: "#ffffff", background: "rgba(12, 14, 22, 0.85)" },
   contextLabel: { fontSize: 12, color: "#ffffff" },
   kbd: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace' },
@@ -144,14 +157,12 @@ const pipelineMarkdownComponents = {
   p: (props) => <p style={{ margin: 0 }}>{props.children}</p>,
 };
 
-export default function ChatPage({ onAskingChange, warmupApi, llmReady, documents = [], systemStatus = {} }) {
+export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemStatus = {} }) {
   const defaultContextStats = useMemo(() => makeDefaultContextStats(), []);
   const [query, setQuery] = useState("");
   const [asking, setAsking] = useState(false);
   const [messages, setMessages] = useState([]);
   const [conversationId, setConversationId] = useState(null);
-  const [docs, setDocs] = useState([]);
-  const [docsLoading, setDocsLoading] = useState(false);
   const [warmingUp, setWarmingUp] = useState(false);
   const [warmedUp, setWarmedUp] = useState(false);
   const [contextStats, setContextStats] = useState(() => makeDefaultContextStats());
@@ -163,8 +174,6 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
   const messagesBodyRef = useRef(null);
   const navigate = useNavigate();
 
-  const systemDocs = useMemo(() => (Array.isArray(documents) ? documents : []), [documents]);
-  const displayDocs = docs.length ? docs : systemDocs;
   const settingsGroups = useMemo(() => {
     const base = systemStatus?.settings;
     const merged = base ? { ...base } : {};
@@ -180,18 +189,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
   const { data: gpuStats, error: gpuError, loading: gpuLoading } = useGpuDiagnostics(diagnosticsOpen);
   const toggleDiagnostics = useCallback(() => setDiagnosticsOpen((prev) => !prev), []);
 
-  const api = { docs: "/api/documents", ask: "/api/ask", askStream: "/api/ask/stream" };
-
-  const refreshDocs = async () => {
-    setDocsLoading(true);
-    try { const res = await fetch(api.docs); const data = await readJsonSafe(res); if (!res.ok) throw new Error((data && (data.detail || data.error || data.raw)) || `GET /docs ${res.status}`); setDocs(Array.isArray(data) ? data : []); }
-    catch (e) { setDocs([]); }
-    finally { setDocsLoading(false); }
-  };
-
-  useEffect(() => { void refreshDocs(); }, []);
-  useEffect(() => { if (systemDocs.length > 0) { setDocs((existing) => { if (existing.length === 0) return systemDocs; if (existing.length !== systemDocs.length) return systemDocs; return existing; }); } }, [systemDocs]);
-
+  const api = { askStream: "/api/ask/stream" };
   useEffect(() => { if (onAskingChange) onAskingChange(asking || warmingUp || continuing); }, [asking, warmingUp, continuing, onAskingChange]);
   useEffect(() => {
     const el = messagesBodyRef.current;
@@ -616,29 +614,6 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
         </div>
       </section>
 
-      <section style={styles.sideCard}>
-        <div style={styles.sectionHeader}>
-          <h2 style={{ ...styles.sectionTitle, fontSize: 18 }}>Ingested Documents</h2>
-          <span style={styles.badge}>{displayDocs.length} file{displayDocs.length === 1 ? "" : "s"}</span>
-        </div>
-        {docsLoading && <span style={{ ...styles.muted, fontSize: 11 }}>Refreshing...</span>}
-        <div style={{ ...styles.docs, ...(displayDocs.length ? {} : styles.muted) }}>
-          {displayDocs.length === 0 ? (
-            <div>No documents yet. Head back to ingestion to add some.</div>
-          ) : (
-            <ul style={{ margin: 0, paddingLeft: 0, listStyle: "none" }}>
-              {displayDocs.map((d) => (
-                <li key={d.hash || d.stored_name || d.name} style={styles.listItem}>
-                  <div title={d.name || d.stored_name || d.path} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    <strong style={styles.docTitle}>{truncateName(d.name || d.stored_name || d.path || "")}</strong>
-                    <span style={{ ...styles.muted, fontSize: 12 }}>{`${prettyBytes(d.size)}${d.hash ? ` · ${shortHash(d.hash)}` : ""}`}</span>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </section>
     </div>
     </>
   );
