@@ -62,7 +62,6 @@ class GPUPhaseManager:
                     await self._call_control(self._llm_url, "unload")
                     await self._call_control(self._ocr_url, "load")
                 else:
-                    await self._call_control(self._ocr_url, "unload")
                     await self._call_control(self._llm_url, "load")
                 self._state = target
                 self._last_error = None
