@@ -90,37 +90,32 @@ async def healthz() -> dict[str, str]:
 async def system_status() -> dict:
     docs = await document_store.list_documents()
     ready = any((doc.get("status") == "processed") for doc in docs)
-    running = [
-        jid for jid, info in jobs_registry.items()
+    running_jobs = [
+        (jid, info)
+        for jid, info in jobs_registry.items()
         if info.get("status") in {"queued", "running"}
     ]
+
+    def _job_payload(jid: str, info: Dict[str, Any]) -> Dict[str, Any]:
+        docs = info.get("docs") or []
+        return {
+            "job_id": jid,
+            "doc_hash": info.get("hash"),
+            "status": info.get("status"),
+            "file": info.get("file"),
+            "progress": info.get("progress"),
+            "docs": docs,
+            "total_docs": info.get("total_docs", len(docs)),
+            "phase": info.get("phase"),
+        }
     return {
         "ready": ready,
-        "has_running_jobs": len(running) > 0,
-        "running_jobs": [
-            {
-                "job_id": jid,
-                "doc_hash": info.get("hash"),
-                "status": info.get("status"),
-                "file": info.get("file"),
-                "progress": info.get("progress"),
-            }
-            for jid, info in jobs_registry.items()
-            if info.get("status") in {"queued", "running"}
-        ],
+        "has_running_jobs": len(running_jobs) > 0,
+        "running_jobs": [_job_payload(jid, info) for jid, info in running_jobs],
         "total_jobs": len(jobs_registry),
         "docs_count": sum(1 for doc in docs if str(doc.get("status")).lower() == "processed"),
         "total_docs": len(docs),
-        "jobs": [
-            {
-                "job_id": jid,
-                "doc_hash": info.get("hash"),
-                "status": info.get("status"),
-                "file": info.get("file"),
-                "progress": info.get("progress"),
-            }
-            for jid, info in jobs_registry.items()
-        ],
+        "jobs": [_job_payload(jid, info) for jid, info in jobs_registry.items()],
         "documents": [format_document_row(doc) for doc in docs],
         "llm_ready": False,
         "settings": _settings_snapshot(),

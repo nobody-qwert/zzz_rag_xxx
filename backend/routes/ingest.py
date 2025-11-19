@@ -1,20 +1,28 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, File, UploadFile
 
 try:
-    from ..services.ingestion import get_job_status, ingest_file, retry_ingest
+    from ..services.ingestion import get_job_status, ingest_files, retry_ingest
 except ImportError:  # pragma: no cover
-    from services.ingestion import get_job_status, ingest_file, retry_ingest  # type: ignore
+    from services.ingestion import get_job_status, ingest_files, retry_ingest  # type: ignore
 
 router = APIRouter()
 
 
 @router.post("/ingest")
-async def ingest(file: UploadFile = File(...)) -> Dict[str, Any]:
-    return await ingest_file(file)
+async def ingest(
+    files: Optional[List[UploadFile]] = File(None),
+    file: Optional[UploadFile] = File(None),
+) -> Dict[str, Any]:
+    uploads: List[UploadFile] = []
+    if files:
+        uploads.extend(files)
+    if file:
+        uploads.append(file)
+    return await ingest_files(uploads)
 
 
 @router.get("/status/{job_id}")

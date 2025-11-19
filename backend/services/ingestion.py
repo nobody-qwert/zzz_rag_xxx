@@ -7,7 +7,7 @@ import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 import httpx
 from fastapi import HTTPException, UploadFile
@@ -29,14 +29,20 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class _QueuedIngestJob:
-    job_id: str
+class _QueuedBatchDoc:
     doc_path: Path
     doc_hash: str
     display_name: str
+    job_record_id: Optional[str] = None
 
 
-_job_queue: "asyncio.Queue[_QueuedIngestJob]" = asyncio.Queue()
+@dataclass
+class _QueuedBatchJob:
+    job_id: str
+    docs: List[_QueuedBatchDoc]
+
+
+_job_queue: "asyncio.Queue[_QueuedBatchJob]" = asyncio.Queue()
 _worker_task: Optional["asyncio.Task[None]"] = None
 _worker_lock = asyncio.Lock()
 
@@ -44,38 +50,38 @@ _worker_lock = asyncio.Lock()
 async def ingest_file(file: UploadFile) -> Dict[str, Any]:
     if file is None:
         raise HTTPException(status_code=400, detail="No file uploaded")
+    return await ingest_files([file])
 
-    display_name = safe_filename(file.filename or "upload.bin")
-    content = await file.read()
-    await file.close()
-    if not content:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
-    doc_hash = hashlib.sha256(content).hexdigest()
-    existing = await document_store.get_document(doc_hash)
-    if existing and existing.get("status") == "processed":
-        return {
-            "job_id": None,
-            "status": "skipped",
-            "file": existing.get("original_name") or display_name,
-            "hash": doc_hash,
-            "message": "Document already ingested",
-        }
+async def ingest_files(files: Sequence[UploadFile]) -> Dict[str, Any]:
+    uploads = [f for f in files if f is not None]
+    if not uploads:
+        raise HTTPException(status_code=400, detail="No files uploaded")
 
-    suffix = Path(display_name).suffix
-    stored_name = f"{doc_hash}{suffix.lower()}" if suffix else doc_hash
-    dest_path = settings.data_dir / stored_name
-    dest_path.write_bytes(content)
+    prepared_docs: List[_QueuedBatchDoc] = []
+    results: List[Dict[str, Any]] = []
 
-    await document_store.upsert_document(
-        doc_hash=doc_hash,
-        original_name=display_name,
-        stored_name=stored_name,
-        size=len(content),
-    )
+    for upload in uploads:
+        doc_info, payload = await _prepare_upload(upload)
+        results.append(payload)
+        if doc_info:
+            prepared_docs.append(doc_info)
 
-    job_id = await _queue_job(dest_path, doc_hash, display_name)
-    return {"job_id": job_id, "status": "queued", "file": display_name, "hash": doc_hash}
+    job_id: Optional[str] = None
+    if prepared_docs:
+        job_id = await _queue_batch_job(prepared_docs)
+        for payload in results:
+            if payload.get("status") == "queued":
+                payload["job_id"] = job_id
+
+    skipped = sum(1 for r in results if r.get("status") == "skipped")
+    return {
+        "job_id": job_id,
+        "results": results,
+        "queued_count": len(prepared_docs),
+        "skipped_count": skipped,
+        "total": len(results),
+    }
 
 
 async def retry_ingest(doc_hash: str) -> Dict[str, Any]:
@@ -89,8 +95,15 @@ async def retry_ingest(doc_hash: str) -> Dict[str, Any]:
         raise HTTPException(status_code=404, detail="Stored document missing")
 
     display_name = doc.get("original_name") or stored_name
-    job_id = await _queue_job(source_path, doc_hash, display_name)
-    return {"job_id": job_id, "status": "queued", "file": display_name, "hash": doc_hash, "retry": True}
+    job_doc = _QueuedBatchDoc(doc_path=source_path, doc_hash=doc_hash, display_name=display_name)
+    job_id = await _queue_batch_job([job_doc])
+    return {
+        "job_id": job_id,
+        "status": "queued",
+        "file": display_name,
+        "hash": doc_hash,
+        "retry": True,
+    }
 
 
 def get_job_status(job_id: str) -> Dict[str, Any]:
@@ -106,8 +119,10 @@ async def delete_document(doc_hash: str) -> Dict[str, Any]:
         raise HTTPException(status_code=404, detail="Document not found")
 
     active_jobs = [
-        jid for jid, info in jobs_registry.items()
-        if info.get("hash") == doc_hash and info.get("status") in {"queued", "running"}
+        jid
+        for jid, info in jobs_registry.items()
+        if info.get("status") in {"queued", "running"}
+        and any(d.get("hash") == doc_hash for d in info.get("docs", []))
     ]
     if active_jobs:
         raise HTTPException(status_code=409, detail="Document is currently processing and cannot be removed")
@@ -125,7 +140,8 @@ async def delete_document(doc_hash: str) -> Dict[str, Any]:
     deleted = await document_store.delete_document(doc_hash)
     removed_jobs: List[str] = []
     for jid, info in list(jobs_registry.items()):
-        if info.get("hash") == doc_hash:
+        docs = info.get("docs") or []
+        if any(d.get("hash") == doc_hash for d in docs):
             removed_jobs.append(jid)
             jobs_registry.pop(jid, None)
 
@@ -137,20 +153,121 @@ async def delete_document(doc_hash: str) -> Dict[str, Any]:
     }
 
 
-async def _queue_job(source_path: Path, doc_hash: str, display_name: str) -> str:
+async def _prepare_upload(file: UploadFile) -> tuple[Optional[_QueuedBatchDoc], Dict[str, Any]]:
+    display_name = safe_filename(file.filename or "upload.bin")
+    content = await file.read()
+    await file.close()
+    if not content:
+        raise HTTPException(status_code=400, detail=f"Uploaded file '{display_name}' is empty")
+
+    doc_hash = hashlib.sha256(content).hexdigest()
+    existing = await document_store.get_document(doc_hash)
+    if existing and existing.get("status") == "processed":
+        return (
+            None,
+            {
+                "job_id": None,
+                "status": "skipped",
+                "file": existing.get("original_name") or display_name,
+                "hash": doc_hash,
+                "message": "Document already ingested",
+            },
+        )
+
+    suffix = Path(display_name).suffix
+    stored_name = f"{doc_hash}{suffix.lower()}" if suffix else doc_hash
+    dest_path = settings.data_dir / stored_name
+    dest_path.write_bytes(content)
+
+    await document_store.upsert_document(
+        doc_hash=doc_hash,
+        original_name=display_name,
+        stored_name=stored_name,
+        size=len(content),
+    )
+
+    return (
+        _QueuedBatchDoc(doc_path=dest_path, doc_hash=doc_hash, display_name=display_name),
+        {
+            "job_id": None,
+            "status": "queued",
+            "file": display_name,
+            "hash": doc_hash,
+        },
+    )
+
+
+async def _queue_batch_job(docs: Sequence[_QueuedBatchDoc]) -> str:
     from uuid import uuid4
 
+    batch_docs = [doc for doc in docs if doc.doc_path.exists()]
+    if not batch_docs:
+        raise HTTPException(status_code=400, detail="No documents to ingest")
+
     job_id = str(uuid4())
-    jobs_registry[job_id] = {
-        "status": "queued",
-        "file": display_name,
-        "hash": doc_hash,
-        "progress": {"phase": "queued", "stage": "queued", "percent": 0.0},
-    }
-    await document_store.create_job(job_id, doc_hash)
-    await _job_queue.put(_QueuedIngestJob(job_id, source_path, doc_hash, display_name))
+    for idx, doc in enumerate(batch_docs, start=1):
+        job_record_id = f"{job_id}:{idx}"
+        doc.job_record_id = job_record_id
+        await document_store.create_job(job_record_id, doc.doc_hash)
+
+    _init_job_entry(job_id, batch_docs)
+    await _job_queue.put(_QueuedBatchJob(job_id=job_id, docs=batch_docs))
     await _ensure_worker_running()
     return job_id
+
+
+def _init_job_entry(job_id: str, docs: Sequence[_QueuedBatchDoc]) -> None:
+    doc_entries: List[Dict[str, Any]] = []
+    for idx, doc in enumerate(docs, start=1):
+        doc_entries.append(
+            {
+                "hash": doc.doc_hash,
+                "file": doc.display_name,
+                "order": idx,
+                "status": "queued",
+                "phase": "queued",
+                "progress": {"phase": "queued", "stage": "queued", "percent": 0.0},
+            }
+        )
+
+    jobs_registry[job_id] = {
+        "status": "queued",
+        "phase": "queued",
+        "progress": {"phase": "queued", "stage": "queued", "percent": 0.0},
+        "docs": doc_entries,
+        "total_docs": len(doc_entries),
+        "file": doc_entries[0]["file"] if len(doc_entries) == 1 else f"{len(doc_entries)} documents",
+        "hash": doc_entries[0]["hash"] if len(doc_entries) == 1 else None,
+    }
+
+
+def _set_job_progress(job_id: str, phase: str, percent: float, *, stage: Optional[str] = None, **extra: Any) -> None:
+    info = jobs_registry.get(job_id)
+    if not info:
+        return
+    payload = {
+        "phase": phase,
+        "stage": stage or phase,
+        "percent": max(0.0, min(100.0, float(percent))),
+    }
+    for key, value in extra.items():
+        if value is not None:
+            payload[key] = value
+    info["phase"] = phase
+    info["progress"] = payload
+
+
+def _update_doc_progress(doc_entry: Dict[str, Any], phase: str, percent: float, *, stage: Optional[str] = None, **extra: Any) -> None:
+    payload = {
+        "phase": phase,
+        "stage": stage or phase,
+        "percent": max(0.0, min(100.0, float(percent))),
+    }
+    for key, value in extra.items():
+        if value is not None:
+            payload[key] = value
+    doc_entry["phase"] = phase
+    doc_entry["progress"] = payload
 
 
 async def _ensure_worker_running() -> None:
@@ -164,7 +281,7 @@ async def _job_worker() -> None:
     while True:
         job = await _job_queue.get()
         try:
-            await _process_job(job.job_id, job.doc_path, job.doc_hash, job.display_name)
+            await _process_job(job.job_id, job.docs)
         except asyncio.CancelledError:
             _job_queue.put_nowait(job)
             raise
@@ -174,31 +291,35 @@ async def _job_worker() -> None:
             _job_queue.task_done()
 
 
-async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name: str) -> None:
-    async def update(status: str, *, error: Optional[str] = None) -> None:
-        jobs_registry[job_id]["status"] = status if not error else f"error: {error}"
-        await document_store.update_document_status(doc_hash, status if not error else "error", error=error)
+async def _process_job(job_id: str, docs: Sequence[_QueuedBatchDoc]) -> None:
+    info = jobs_registry.get(job_id)
+    if not info:
+        return
 
-    def set_progress(phase: str, percent: float, *, stage: Optional[str] = None, **extra: Any) -> None:
-        payload = {
-            "phase": phase,
-            "stage": stage or phase,
-            "percent": max(0.0, min(100.0, float(percent))),
-        }
-        for key, value in extra.items():
-            if value is not None:
-                payload[key] = value
-        jobs_registry[job_id]["progress"] = payload
+    total_docs = len(docs)
+    if total_docs == 0:
+        info["status"] = "done"
+        _set_job_progress(job_id, "completed", 100.0, stage="completed")
+        return
 
-    start_total = time.perf_counter()
-    ocr_time = None
-    chunking_time = None
-    embedding_time = None
+    doc_entries = info.get("docs", [])
+    doc_by_hash = {entry.get("hash"): entry for entry in doc_entries}
+    info["status"] = "running"
+    _set_job_progress(job_id, "ocr", 0.0, stage="starting", total_docs=total_docs)
 
-    try:
-        await document_store.mark_job_started(job_id)
-        await document_store.update_document_status(doc_hash, "processing")
-        set_progress("ocr", 0.0, stage="starting")
+    ocr_payloads: Dict[str, Dict[str, Any]] = {}
+    successful_docs: List[_QueuedBatchDoc] = []
+    errors: Dict[str, str] = {}
+
+    for index, doc in enumerate(docs, start=1):
+        doc_entry = doc_by_hash.get(doc.doc_hash)
+        if not doc_entry:
+            continue
+        await document_store.update_document_status(doc.doc_hash, "ocr_pending")
+        if doc.job_record_id:
+            await document_store.mark_job_started(doc.job_record_id)
+        doc_entry["status"] = "ocr_running"
+        _update_doc_progress(doc_entry, "ocr", 0.0, stage="starting")
 
         start_ocr = time.perf_counter()
 
@@ -206,56 +327,92 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
             if not data:
                 return
             stage = str(data.get("stage") or "ocr")
-            percent = data.get("percent")
-            current = data.get("current")
-            total = data.get("total")
+            percent_raw = data.get("percent")
             try:
-                percent_val = float(percent) if percent is not None else jobs_registry.get(job_id, {}).get("progress", {}).get("percent", 0.0)
+                percent_val = float(percent_raw) if percent_raw is not None else float(doc_entry.get("progress", {}).get("percent", 0.0))
             except (TypeError, ValueError):
-                percent_val = jobs_registry.get(job_id, {}).get("progress", {}).get("percent", 0.0)
-            set_progress("ocr", percent_val, stage=stage, current=current, total=total)
+                percent_val = float(doc_entry.get("progress", {}).get("percent", 0.0))
+            _update_doc_progress(
+                doc_entry,
+                "ocr",
+                percent_val,
+                stage=stage,
+                current=data.get("current"),
+                total=data.get("total"),
+            )
 
         try:
-            ocr_result = await _call_ocr_module(doc_hash, doc_path, progress_cb=ocr_progress_callback)
+            ocr_result = await _call_ocr_module(doc.doc_hash, doc.doc_path, progress_cb=ocr_progress_callback)
             ocr_time = time.perf_counter() - start_ocr
-        except Exception as exc:
-            ocr_time = None
-            logger.error("OCR module failed for %s: %s", doc_path, exc)
-            set_progress("ocr", 100.0, stage="failed", error=str(exc))
-            raise
+            ocr_text_raw = ocr_result.get("text") or ""
+            ocr_text = ocr_text_raw.strip()
+            if not ocr_text:
+                raise RuntimeError(f"OCR parser returned no text for document '{doc.display_name}'")
+            ocr_meta = ocr_result.get("metadata") or {}
+            await document_store.upsert_extraction(
+                doc.doc_hash,
+                settings.ocr_parser_key,
+                text=ocr_text,
+                meta_json=json.dumps({**ocr_meta, "source": "ocr"}),
+            )
+            await document_store.update_document_status(doc.doc_hash, "waiting_postprocess")
+            doc_entry["status"] = "ocr_completed"
+            _update_doc_progress(doc_entry, "ocr", 100.0, stage="completed")
+            ocr_payloads[doc.doc_hash] = {"text": ocr_text, "metadata": ocr_meta, "ocr_time": ocr_time}
+            successful_docs.append(doc)
+        except Exception as exc:  # pragma: no cover - background task logging
+            error_msg = str(exc)
+            errors[doc.doc_hash] = error_msg
+            doc_entry["status"] = "error"
+            _update_doc_progress(doc_entry, "ocr", doc_entry.get("progress", {}).get("percent", 0.0), stage="failed", error=error_msg)
+            await document_store.update_document_status(doc.doc_hash, "error", error=error_msg)
+            if doc.job_record_id:
+                await document_store.finish_job(doc.job_record_id, "error", error=error_msg)
+            logger.exception("OCR failed for %s: %s", doc.doc_path, exc)
+        finally:
+            percent = (index / total_docs) * 50.0
+            _set_job_progress(job_id, "ocr", percent, stage=f"{index}/{total_docs}")
 
-        ocr_text_raw = ocr_result.get("text") or ""
-        ocr_text = ocr_text_raw.strip()
+    if not successful_docs:
+        info["status"] = "error"
+        _set_job_progress(job_id, "error", 50.0, stage="ocr_failed", message="All OCR attempts failed")
+        return
+
+    chunk_specs = [
+        ChunkWindowSpec(
+            name="small",
+            core_size=settings.chunk_size,
+            left_padding=settings.chunk_overlap,
+            right_padding=settings.chunk_overlap,
+            step_size=settings.chunk_size,
+        ),
+        ChunkWindowSpec(
+            name="large",
+            core_size=settings.large_chunk_size,
+            left_padding=settings.large_chunk_left_overlap,
+            right_padding=settings.large_chunk_right_overlap,
+            step_size=settings.large_chunk_size,
+        ),
+    ]
+
+    _set_job_progress(job_id, "postprocess", 50.0, stage="starting", total_docs=len(successful_docs))
+    emb_client = EmbeddingClient()
+    post_total = len(successful_docs)
+    processed_docs = 0
+
+    for doc in successful_docs:
+        doc_entry = doc_by_hash.get(doc.doc_hash)
+        if not doc_entry:
+            continue
+        payload = ocr_payloads.get(doc.doc_hash) or {}
+        ocr_text = payload.get("text") or ""
         if not ocr_text:
-            set_progress("ocr", 100.0, stage="failed", error="empty_text")
-            raise RuntimeError(f"OCR parser returned no text for document '{display_name}'")
+            doc_entry["status"] = "error"
+            _update_doc_progress(doc_entry, "chunking", 0.0, stage="failed", error="missing_ocr_text")
+            continue
 
-        ocr_meta = ocr_result.get("metadata") or {}
-        await document_store.upsert_extraction(
-            doc_hash,
-            settings.ocr_parser_key,
-            text=ocr_text,
-            meta_json=json.dumps({**ocr_meta, "source": "ocr"}),
-        )
-        set_progress("ocr", 100.0, stage="completed")
+        await document_store.update_document_status(doc.doc_hash, "processing")
 
-        start_chunking = time.perf_counter()
-        chunk_specs = [
-            ChunkWindowSpec(
-                name="small",
-                core_size=settings.chunk_size,
-                left_padding=settings.chunk_overlap,
-                right_padding=settings.chunk_overlap,
-                step_size=settings.chunk_size,
-            ),
-            ChunkWindowSpec(
-                name="large",
-                core_size=settings.large_chunk_size,
-                left_padding=settings.large_chunk_left_overlap,
-                right_padding=settings.large_chunk_right_overlap,
-                step_size=settings.large_chunk_size,
-            ),
-        ]
         def chunk_progress_callback(data: Dict[str, Any]) -> None:
             if not data:
                 return
@@ -283,7 +440,8 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
             overall_fraction = ((spec_index - 1) + spec_fraction) / spec_total
             overall_percent = max(0.0, min(100.0, overall_fraction * 100.0))
             stage_label = f"{spec_name}:{spec_stage}" if spec_stage else spec_name
-            set_progress(
+            _update_doc_progress(
+                doc_entry,
                 "chunking",
                 overall_percent,
                 stage=stage_label,
@@ -294,94 +452,98 @@ async def _process_job(job_id: str, doc_path: Path, doc_hash: str, display_name:
                 chunk_count=data.get("chunk_count"),
             )
 
-        set_progress("chunking", 0.0, stage="starting")
-        chunk_views = chunk_text_multi(ocr_text, chunk_specs, progress_cb=chunk_progress_callback)
-        small_chunks = chunk_views.get("small", [])
-        large_chunks = chunk_views.get("large", [])
-        if not small_chunks:
-            raise RuntimeError(f"No OCR text extracted for document '{display_name}'")
-        small_chunk_rows = [(c.chunk_id, c.order_index, c.text, c.token_count) for c in small_chunks]
-        large_chunk_rows = [(c.chunk_id, c.order_index, c.text, c.token_count) for c in large_chunks]
-        await document_store.replace_chunks(doc_hash, settings.chunk_config_small_id, small_chunk_rows)
-        await document_store.replace_chunks(doc_hash, settings.chunk_config_large_id, large_chunk_rows)
-        chunking_time = time.perf_counter() - start_chunking
-        set_progress(
-            "chunking",
-            100.0,
-            stage="completed",
-            small_chunks=len(small_chunks),
-            large_chunks=len(large_chunks),
-        )
-
-        start_embedding = time.perf_counter()
-        total_chunk_rows = len(small_chunk_rows) + len(large_chunk_rows)
-        set_progress("embedding", 0.0, stage="starting", chunks=total_chunk_rows)
-        emb_client = EmbeddingClient()
-
-        def embedding_progress_callback(info: Dict[str, Any]) -> None:
-            if not info:
-                return
-            try:
-                percent_val = float(info.get("percent") or 0.0)
-            except (TypeError, ValueError):
-                percent_val = 0.0
-            processed = info.get("processed")
-            total = info.get("total")
-            set_progress(
-                "embedding",
-                percent_val,
-                stage="batch",
-                processed=processed,
-                total=total,
-            )
-
-        rows = await _compute_embeddings_for_chunks(
-            [
-                {"chunk_id": cid, "order_index": idx, "text": txt, "token_count": tok}
-                for (cid, idx, txt, tok) in (small_chunk_rows + large_chunk_rows)
-            ],
-            emb_client,
-            doc_hash,
-            progress_cb=embedding_progress_callback,
-        )
-        await document_store.replace_embeddings(rows)
-        embedding_time = time.perf_counter() - start_embedding
-        set_progress(
-            "embedding",
-            100.0,
-            stage="completed",
-            embeddings=len(rows),
-            small_embeddings=len(small_chunk_rows),
-            large_embeddings=len(large_chunk_rows),
-        )
-
-        total_time = time.perf_counter() - start_total
         try:
-            await document_store.save_performance_metrics(
-                doc_hash,
-                ocr_time_sec=ocr_time,
-                chunking_time_sec=chunking_time,
-                embedding_time_sec=embedding_time,
-                total_time_sec=total_time,
-            )
-        except Exception as perf_exc:  # pragma: no cover - metrics best effort
-            logger.warning("Failed to save performance metrics for %s: %s", doc_hash, perf_exc)
+            doc_entry["status"] = "chunking"
+            _update_doc_progress(doc_entry, "chunking", 0.0, stage="starting")
+            start_chunking = time.perf_counter()
+            chunk_views = chunk_text_multi(ocr_text, chunk_specs, progress_cb=chunk_progress_callback)
+            small_chunks = chunk_views.get("small", [])
+            large_chunks = chunk_views.get("large", [])
+            if not small_chunks:
+                raise RuntimeError(f"No OCR text extracted for document '{doc.display_name}'")
 
-        await document_store.mark_document_processed(doc_hash)
-        await document_store.finish_job(job_id, "done")
-        jobs_registry[job_id]["status"] = "done"
-        set_progress("completed", 100.0, stage="done")
-    except asyncio.CancelledError:
-        await document_store.finish_job(job_id, "cancelled", error="cancelled")
-        await update("error", error="cancelled")
-        set_progress("error", 0.0, stage="cancelled")
-        raise
-    except Exception as exc:  # pragma: no cover - background task logging
-        await document_store.finish_job(job_id, "error", error=str(exc))
-        await update("error", error=str(exc))
-        current_percent = jobs_registry.get(job_id, {}).get("progress", {}).get("percent", 0.0)
-        set_progress("error", current_percent, stage="failed", message=str(exc))
-        logger.exception("Job %s failed: %s", job_id, exc)
+            small_chunk_rows = [(c.chunk_id, c.order_index, c.text, c.token_count) for c in small_chunks]
+            large_chunk_rows = [(c.chunk_id, c.order_index, c.text, c.token_count) for c in large_chunks]
+            await document_store.replace_chunks(doc.doc_hash, settings.chunk_config_small_id, small_chunk_rows)
+            await document_store.replace_chunks(doc.doc_hash, settings.chunk_config_large_id, large_chunk_rows)
+            chunking_time = time.perf_counter() - start_chunking
+
+            doc_entry["status"] = "embedding"
+
+            def embedding_progress_callback(data: Dict[str, Any]) -> None:
+                if not data:
+                    return
+                try:
+                    percent_val = float(data.get("percent") or 0.0)
+                except (TypeError, ValueError):
+                    percent_val = 0.0
+                _update_doc_progress(
+                    doc_entry,
+                    "embedding",
+                    percent_val,
+                    stage="batch",
+                    processed=data.get("processed"),
+                    total=data.get("total"),
+                )
+
+            _update_doc_progress(doc_entry, "embedding", 0.0, stage="starting")
+            start_embedding = time.perf_counter()
+            rows = await _compute_embeddings_for_chunks(
+                [
+                    {"chunk_id": cid, "order_index": idx, "text": txt, "token_count": tok}
+                    for (cid, idx, txt, tok) in (small_chunk_rows + large_chunk_rows)
+                ],
+                emb_client,
+                doc.doc_hash,
+                progress_cb=embedding_progress_callback,
+            )
+            await document_store.replace_embeddings(rows)
+            embedding_time = time.perf_counter() - start_embedding
+
+            total_time = (payload.get("ocr_time", 0.0) or 0.0) + chunking_time + embedding_time
+            try:
+                await document_store.save_performance_metrics(
+                    doc.doc_hash,
+                    ocr_time_sec=payload.get("ocr_time"),
+                    chunking_time_sec=chunking_time,
+                    embedding_time_sec=embedding_time,
+                    total_time_sec=total_time,
+                )
+            except Exception as perf_exc:  # pragma: no cover - metrics best effort
+                logger.warning("Failed to save performance metrics for %s: %s", doc.doc_hash, perf_exc)
+
+            await document_store.mark_document_processed(doc.doc_hash)
+            if doc.job_record_id:
+                await document_store.finish_job(doc.job_record_id, "done")
+
+            doc_entry["status"] = "completed"
+            _update_doc_progress(
+                doc_entry,
+                "completed",
+                100.0,
+                stage="done",
+                embeddings=len(rows),
+                small_embeddings=len(small_chunk_rows),
+                large_embeddings=len(large_chunk_rows),
+            )
+        except Exception as exc:
+            error_msg = str(exc)
+            doc_entry["status"] = "error"
+            _update_doc_progress(doc_entry, "chunking", doc_entry.get("progress", {}).get("percent", 0.0), stage="failed", error=error_msg)
+            await document_store.update_document_status(doc.doc_hash, "error", error=error_msg)
+            if doc.job_record_id:
+                await document_store.finish_job(doc.job_record_id, "error", error=error_msg)
+            logger.exception("Chunking/embedding failed for %s: %s", doc.doc_hash, exc)
+            continue
+
+        processed_docs += 1
+        percent = 50.0 + (processed_docs / post_total) * 50.0
+        _set_job_progress(job_id, "postprocess", percent, stage=f"{processed_docs}/{post_total}")
+
+    had_errors = bool(errors) or any(entry.get("status") == "error" for entry in doc_entries)
+    info["status"] = "error" if had_errors else "done"
+    final_stage = "failed" if had_errors else "done"
+    _set_job_progress(job_id, "completed" if not had_errors else "error", 100.0, stage=final_stage)
 
 
 async def _call_ocr_module(

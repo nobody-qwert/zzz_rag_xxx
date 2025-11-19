@@ -297,9 +297,16 @@ export default function IngestPage({ systemStatus = {} }) {
     const map = new Map();
     if (Array.isArray(systemStatus.jobs)) {
       systemStatus.jobs.forEach((job) => {
-        if (job && job.doc_hash) {
-          map.set(job.doc_hash, job);
-        }
+        if (!job || !Array.isArray(job.docs)) return;
+        job.docs.forEach((docEntry) => {
+          if (docEntry && docEntry.hash) {
+            map.set(docEntry.hash, {
+              ...docEntry,
+              job_id: job.job_id,
+              job_status: job.status,
+            });
+          }
+        });
       });
     }
     return map;
@@ -323,50 +330,78 @@ export default function IngestPage({ systemStatus = {} }) {
     }));
     setUploadProgress(progress);
     
-    // Upload all files in parallel
-    const uploadPromises = files.map(async (file, idx) => {
-      try {
-        // Client-side guard: only allow PDFs to be sent
-        const isPdf = (file && (file.type === "application/pdf" || /\.pdf$/i.test(file.name)));
-        if (!isPdf) {
-          setUploadProgress(prev => prev.map((p, i) => 
-            i === idx ? { ...p, status: "error", error: "Only PDF files are supported" } : p
-          ));
-          return;
-        }
-        // Update status to uploading
+    const validFiles = [];
+    files.forEach((file, idx) => {
+      const isPdf = (file && (file.type === "application/pdf" || /\.pdf$/i.test(file.name)));
+      if (!isPdf) {
         setUploadProgress(prev => prev.map((p, i) => 
-          i === idx ? { ...p, status: "uploading" } : p
+          i === idx ? { ...p, status: "error", error: "Only PDF files are supported" } : p
         ));
-        
-        const form = new FormData();
-        form.append("file", file);
-        const res = await fetch(api.ingest, { method: "POST", body: form });
-        const data = await readJsonSafe(res);
-        
-        if (!res.ok) throw new Error((data && (data.detail || data.error || data.raw)) || res.statusText);
-        
-        if (data.status === "skipped") {
-          setUploadProgress(prev => prev.map((p, i) => 
-            i === idx ? { ...p, status: "skipped", error: "Already ingested" } : p
-          ));
-        } else if (data.job_id) {
-          setUploadProgress(prev => prev.map((p, i) => 
-            i === idx ? { ...p, status: "queued", jobId: data.job_id, jobHash: data.hash || p.jobHash } : p
-          ));
-          setActiveJobs(prev => new Set([...prev, data.job_id]));
-        }
-      } catch (e) {
-        setUploadProgress(prev => prev.map((p, i) => 
-          i === idx ? { ...p, status: "error", error: e.message || String(e) } : p
-        ));
+        return;
       }
+      validFiles.push({ file, idx });
+      setUploadProgress(prev => prev.map((p, i) => 
+        i === idx ? { ...p, status: "uploading" } : p
+      ));
     });
-    
-    await Promise.all(uploadPromises);
-    setUploading(false);
-    setUploadStatus(`Uploaded ${files.length} file(s). Processing...`);
-    void refreshDocs();
+
+    if (validFiles.length === 0) {
+      setUploading(false);
+      setUploadStatus("No valid PDF files to upload.");
+      return;
+    }
+
+    try {
+      const form = new FormData();
+      validFiles.forEach(({ file }) => form.append("files", file));
+      const res = await fetch(api.ingest, { method: "POST", body: form });
+      const data = await readJsonSafe(res);
+      if (!res.ok) throw new Error((data && (data.detail || data.error || data.raw)) || res.statusText);
+
+      const results = Array.isArray(data.results) ? [...data.results] : [];
+      setUploadProgress(prev => {
+        const queue = [...results];
+        return prev.map((item) => {
+          if (queue.length === 0) return item;
+          if (item.status === "uploading" || item.status === "pending") {
+            const result = queue.shift();
+            if (!result) return item;
+            const status = result.status || item.status;
+            const error = result.message || result.error || item.error;
+            return {
+              ...item,
+              status,
+              error: error || null,
+              jobId: result.job_id || data.job_id || item.jobId,
+              jobHash: result.hash || item.jobHash,
+              jobProgress: null,
+            };
+          }
+          return item;
+        });
+      });
+
+      if (data.job_id) {
+        setActiveJobs(prev => new Set([...prev, data.job_id]));
+      }
+
+      const queuedCount = results.filter(r => r && r.status === "queued").length;
+      const skippedCount = results.filter(r => r && r.status === "skipped").length;
+      if (queuedCount > 0) {
+        setUploadStatus(`Queued ${queuedCount} document${queuedCount === 1 ? "" : "s"}.`);
+      } else if (skippedCount > 0) {
+        setUploadStatus(`Skipped ${skippedCount} already ingested document${skippedCount === 1 ? "" : "s"}.`);
+      } else {
+        setUploadStatus("Upload finished.");
+      }
+
+      setFiles([]);
+      void refreshDocs();
+    } catch (err) {
+      setUploadStatus(err.message || String(err));
+    } finally {
+      setUploading(false);
+    }
   };
 
   const handleRetry = useCallback(async (hash) => {
@@ -508,22 +543,28 @@ export default function IngestPage({ systemStatus = {} }) {
         })
       );
       
-      const progressMap = new Map();
+      const jobDocsMap = new Map();
       results.forEach((r) => {
         if (r && r.jobId && r.payload) {
-          progressMap.set(r.jobId, r);
+          jobDocsMap.set(r.jobId, {
+            jobStatus: r.status,
+            payload: r.payload,
+            docs: Array.isArray(r.payload.docs) ? r.payload.docs : [],
+          });
         }
       });
-      if (progressMap.size > 0) {
+      if (jobDocsMap.size > 0) {
         setUploadProgress(prev =>
           prev.map((entry) => {
-            if (!entry.jobId || !progressMap.has(entry.jobId)) return entry;
-            const info = progressMap.get(entry.jobId);
-            const nextProgress = info.payload?.progress || entry.jobProgress;
-            const nextHash = info.payload?.doc_hash || info.payload?.hash || entry.jobHash;
+            if (!entry.jobId || !jobDocsMap.has(entry.jobId)) return entry;
+            const info = jobDocsMap.get(entry.jobId);
+            const docMatch = info.docs.find((doc) => (doc && (doc.hash === entry.jobHash || doc.file === entry.name)));
+            const nextProgress = docMatch?.progress || entry.jobProgress;
+            const nextHash = docMatch?.hash || entry.jobHash;
+            const nextStatus = docMatch?.status ? String(docMatch.status).toLowerCase() : entry.status;
             return {
               ...entry,
-              status: info.status || entry.status,
+              status: nextStatus || entry.status,
               jobProgress: nextProgress || entry.jobProgress,
               jobHash: nextHash || entry.jobHash,
             };
@@ -589,6 +630,15 @@ export default function IngestPage({ systemStatus = {} }) {
               {uploadProgress.map((p) => {
                 const uploadWidth = clampPercent(p.jobProgress?.percent, 0);
                 const uploadLabel = formatProgressDetails(p.jobProgress) || p.status;
+                const normalizedStatus = typeof p.status === "string" ? p.status.toLowerCase() : "";
+                const statusIcon = (() => {
+                  if (normalizedStatus === "pending") return "⏸";
+                  if (normalizedStatus === "uploading") return "⏳";
+                  if (normalizedStatus === "queued" || normalizedStatus === "completed" || normalizedStatus === "done") return "✓";
+                  if (normalizedStatus === "skipped") return "⊘";
+                  if (normalizedStatus.startsWith("error")) return "✗";
+                  return "⚙︎";
+                })();
                 return (
                   <div 
                     key={p.id} 
@@ -603,13 +653,9 @@ export default function IngestPage({ systemStatus = {} }) {
                     gap: 8,
                     boxShadow: "0 18px 30px rgba(4, 7, 20, 0.6)"
                   }}
-                    >
+                  >
                   <span>
-                    {p.status === "pending" && "⏸"}
-                    {p.status === "uploading" && "⏳"}
-                    {p.status === "queued" && "✓"}
-                    {p.status === "skipped" && "⊘"}
-                    {p.status === "error" && "✗"}
+                    {statusIcon}
                   </span>
                   <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {p.name}
