@@ -26,6 +26,7 @@ function AppContent() {
     total_docs: 0,
     jobs: [],
     llm_ready: false,
+    gpu_phase: null,
     documents: [],
     settings: null,
   });
@@ -48,12 +49,20 @@ function AppContent() {
         // jobs listing is optional; try and ignore errors
         let jobs = [];
         let statusSettings = null;
+        let llmReadyValue;
+        let gpuPhaseValue;
         try {
           const r = await fetch("/api/status");
           const j = await readJsonSafe(r);
           if (r.ok && j) {
             if (Array.isArray(j.jobs)) jobs = j.jobs;
             if (j.settings && typeof j.settings === "object") statusSettings = j.settings;
+            if (Object.prototype.hasOwnProperty.call(j, "llm_ready")) {
+              llmReadyValue = j.llm_ready;
+            }
+            if (Object.prototype.hasOwnProperty.call(j, "gpu_phase")) {
+              gpuPhaseValue = j.gpu_phase;
+            }
           }
         } catch {}
 
@@ -68,6 +77,8 @@ function AppContent() {
           jobs,
           documents: docsArr,
           settings: statusSettings || prev.settings,
+          llm_ready: llmReadyValue !== undefined ? llmReadyValue : prev.llm_ready,
+          gpu_phase: gpuPhaseValue !== undefined ? gpuPhaseValue : prev.gpu_phase,
         }));
       } catch (e) {
         console.error("status error", e);
@@ -93,7 +104,13 @@ function AppContent() {
           <Routes>
             <Route path="/ingest" element={<IngestPage systemStatus={systemStatus} />} />
             <Route path="/chat" element={systemStatus.ready && systemStatus.docs_count > 0 && !systemStatus.has_running_jobs ? (
-              <ChatPage onAskingChange={updateAskingStatus} warmupApi={api.warmup} llmReady={systemStatus.llm_ready} documents={systemStatus.documents} />
+              <ChatPage
+                onAskingChange={updateAskingStatus}
+                warmupApi={api.warmup}
+                llmReady={systemStatus.llm_ready}
+                documents={systemStatus.documents}
+                systemStatus={systemStatus}
+              />
             ) : (<Navigate to="/ingest" replace />)} />
             <Route path="/" element={<Navigate to="/ingest" replace />} />
           </Routes>

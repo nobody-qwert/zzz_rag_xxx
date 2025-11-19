@@ -5,6 +5,8 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
+import DiagnosticsPanel from "./components/DiagnosticsPanel";
+import useGpuDiagnostics from "./hooks/useGpuDiagnostics";
 
 const ENV_CONTEXT_LIMIT = Number(import.meta.env.VITE_LLM_CONTEXT_SIZE || "10000") || 10000;
 const makeDefaultContextStats = () => ({ used: 0, limit: ENV_CONTEXT_LIMIT, truncated: false, ratio: 0 });
@@ -142,7 +144,7 @@ const pipelineMarkdownComponents = {
   p: (props) => <p style={{ margin: 0 }}>{props.children}</p>,
 };
 
-export default function ChatPage({ onAskingChange, warmupApi, llmReady, documents = [] }) {
+export default function ChatPage({ onAskingChange, warmupApi, llmReady, documents = [], systemStatus = {} }) {
   const defaultContextStats = useMemo(() => makeDefaultContextStats(), []);
   const [query, setQuery] = useState("");
   const [asking, setAsking] = useState(false);
@@ -156,12 +158,27 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
   const [pendingFollowUp, setPendingFollowUp] = useState(null);
   const [continuing, setContinuing] = useState(false);
   const [expandedSources, setExpandedSources] = useState({});
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const warmupAttemptRef = useRef(false);
   const messagesBodyRef = useRef(null);
   const navigate = useNavigate();
 
   const systemDocs = useMemo(() => (Array.isArray(documents) ? documents : []), [documents]);
   const displayDocs = docs.length ? docs : systemDocs;
+  const settingsGroups = useMemo(() => {
+    const base = systemStatus?.settings;
+    const merged = base ? { ...base } : {};
+    if (systemStatus?.gpu_phase) {
+      merged.gpu = {
+        state: systemStatus.gpu_phase.state || "unknown",
+        last_error: systemStatus.gpu_phase.last_error || "",
+      };
+    }
+    return Object.keys(merged).length > 0 ? merged : null;
+  }, [systemStatus]);
+
+  const { data: gpuStats, error: gpuError, loading: gpuLoading } = useGpuDiagnostics(diagnosticsOpen);
+  const toggleDiagnostics = useCallback(() => setDiagnosticsOpen((prev) => !prev), []);
 
   const api = { docs: "/api/documents", ask: "/api/ask", askStream: "/api/ask/stream" };
 
@@ -442,8 +459,17 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
   };
 
   return (
-    <div style={styles.page}>
-      <section style={styles.chatCard}>
+    <>
+      <DiagnosticsPanel
+        open={diagnosticsOpen}
+        onToggle={toggleDiagnostics}
+        groups={settingsGroups}
+        gpu={gpuStats}
+        gpuError={gpuError}
+        gpuLoading={gpuLoading}
+      />
+      <div style={styles.page}>
+        <section style={styles.chatCard}>
         <div style={styles.sectionHeader}>
           <h2 style={styles.sectionTitle}>Chat Workspace</h2>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
@@ -614,6 +640,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, document
         </div>
       </section>
     </div>
+    </>
   );
 }
 

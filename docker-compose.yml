@@ -7,6 +7,7 @@ services:
     depends_on:
       - embed
       - ocr-module
+      - diagnostics
     environment:
       APP_DATA_ROOT: ${APP_DATA_ROOT:-/app_data}
       LLM_BASE_URL: ${LLM_BASE_URL:-http://${LLM_ENDPOINT:-llm_small}:8000/v1}
@@ -24,6 +25,7 @@ services:
       LLM_CONTROL_URL: ${LLM_CONTROL_URL:-http://${LLM_ENDPOINT:-llm_small}:9000/control}
       OCR_CONTROL_URL: ${OCR_CONTROL_URL:-http://ocr-module:8000/control}
       GPU_PHASE_TIMEOUT: ${GPU_PHASE_TIMEOUT:-60}
+      DIAGNOSTICS_URL: ${DIAGNOSTICS_URL:-http://diagnostics:9001}
     volumes:
       - ${HOST_APP_DATA:-./app_data}:${APP_DATA_ROOT:-/app_data}
     ports:
@@ -137,6 +139,23 @@ services:
       - ${EMBED_MODEL_DIR:-./models/embed}:/models/embed:ro
     ports:
       - "${EMBED_HOST_PORT:-8011}:8080"
+
+  diagnostics:
+    build:
+      context: ./diagnostics
+      dockerfile: Dockerfile
+    env_file: .env
+    environment:
+      PORT: ${DIAGNOSTICS_PORT:-9001}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    ports:
+      - "${DIAGNOSTICS_HOST_PORT:-9001}:9001"
 
   frontend:
     build:

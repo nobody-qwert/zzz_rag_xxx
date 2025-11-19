@@ -10,11 +10,13 @@ try:
     from .helpers import format_document_row
     from ..services.ingestion import warmup_mineru
     from ..services.rag import warmup_llm
+    from ..utils.gpu import get_gpu_snapshot
 except ImportError:  # pragma: no cover
     from dependencies import document_store, jobs_registry, settings, gpu_phase_manager  # type: ignore
     from routes.helpers import format_document_row  # type: ignore
     from services.ingestion import warmup_mineru  # type: ignore
     from services.rag import warmup_llm  # type: ignore
+    from utils.gpu import get_gpu_snapshot  # type: ignore
 
 router = APIRouter()
 
@@ -138,3 +140,8 @@ async def warmup() -> dict:
 @router.post("/warmup/mineru")
 async def warmup_mineru_route() -> dict:
     return await warmup_mineru()
+
+
+@router.get("/diagnostics/gpu")
+async def diagnostics_gpu() -> Dict[str, Any]:
+    return await get_gpu_snapshot()

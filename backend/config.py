@@ -54,6 +54,7 @@ class AppSettings:
     llm_control_url: Optional[str]
     ocr_control_url: Optional[str]
     gpu_phase_timeout: float
+    diagnostics_url: Optional[str]
 
 
 def _int_env(name: str, default: str) -> int:
@@ -120,6 +121,8 @@ def load_settings() -> AppSettings:
         llm_control_url = f"http://{llm_endpoint}:9000/control"
     ocr_control_url = _str_env("OCR_CONTROL_URL", f"{ocr_module_url}/control")
 
+    diagnostics_url = _str_env("DIAGNOSTICS_URL", "http://diagnostics:9001").rstrip("/")
+
     return AppSettings(
         data_dir=data_dir,
         index_dir=index_dir,
@@ -163,6 +166,7 @@ def load_settings() -> AppSettings:
         llm_control_url=llm_control_url.strip() or None,
         ocr_control_url=ocr_control_url.strip() or None,
         gpu_phase_timeout=_float_env("GPU_PHASE_TIMEOUT", "60"),
+        diagnostics_url=diagnostics_url or None,
     )
 
 

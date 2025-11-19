@@ -6,6 +6,7 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
 import DiagnosticsPanel from "./components/DiagnosticsPanel";
+import useGpuDiagnostics from "./hooks/useGpuDiagnostics";
 import "./IngestPage.css";
 
 async function readJsonSafe(res) {
@@ -288,10 +289,19 @@ export default function IngestPage({ systemStatus = {} }) {
   useEffect(() => { void refreshDocs(); }, [refreshDocs]);
 
   const systemDocs = useMemo(() => (Array.isArray(systemStatus.documents) ? systemStatus.documents : []), [systemStatus.documents]);
-  const settingsGroups = useMemo(
-    () => systemStatus.settings || systemStatus.settings_snapshot || null,
-    [systemStatus.settings, systemStatus.settings_snapshot],
-  );
+  const settingsGroups = useMemo(() => {
+    const base = systemStatus.settings || systemStatus.settings_snapshot;
+    const merged = base ? { ...base } : {};
+    if (systemStatus.gpu_phase) {
+      merged.gpu = {
+        state: systemStatus.gpu_phase.state || "unknown",
+        last_error: systemStatus.gpu_phase.last_error || "",
+      };
+    }
+    return Object.keys(merged).length > 0 ? merged : null;
+  }, [systemStatus.settings, systemStatus.settings_snapshot, systemStatus.gpu_phase]);
+
+  const { data: gpuStats, error: gpuError, loading: gpuLoading } = useGpuDiagnostics(diagnosticsOpen);
   const displayDocs = docs.length ? docs : systemDocs;
   const jobInfoByHash = useMemo(() => {
     const map = new Map();
@@ -596,7 +606,14 @@ export default function IngestPage({ systemStatus = {} }) {
 
   return (
     <div style={{ position: "relative" }}>
-      <DiagnosticsPanel open={diagnosticsOpen} onToggle={toggleDiagnostics} groups={settingsGroups} />
+      <DiagnosticsPanel
+        open={diagnosticsOpen}
+        onToggle={toggleDiagnostics}
+        groups={settingsGroups}
+        gpu={gpuStats}
+        gpuError={gpuError}
+        gpuLoading={gpuLoading}
+      />
       <div className="ingest-layout" style={styles.page}>
       <div style={styles.leftColumn}>
         <section style={{ ...styles.card, ...styles.uploadCard }}>
