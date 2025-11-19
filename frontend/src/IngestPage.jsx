@@ -224,8 +224,33 @@ const markdownComponents = {
 };
 
 const FALLBACK_PARSER = "mineru";
-const IN_PROGRESS_STATUSES = new Set(["processing", "ingesting", "queued", "pending", "running", "parsing", "uploading"]);
+const IN_PROGRESS_STATUSES = new Set([
+  "processing",
+  "ingesting",
+  "queued",
+  "pending",
+  "running",
+  "parsing",
+  "uploading",
+  "ocr_pending",
+  "ocr_running",
+  "ocr_completed",
+  "waiting_postprocess",
+  "chunking",
+  "embedding",
+]);
 const COMPLETED_STATUSES = new Set(["processed", "done", "completed", "ready"]);
+const ERROR_STATUSES = new Set(["error", "failed"]);
+
+function normalizeStatus(value) {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function formatStatusLabel(value) {
+  const normalized = normalizeStatus(value);
+  if (!normalized) return "";
+  return normalized.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim().toUpperCase();
+}
 
 export default function IngestPage({ systemStatus = {} }) {
   const navigate = useNavigate();
@@ -845,21 +870,26 @@ export default function IngestPage({ systemStatus = {} }) {
                 const perf = d.performance;
                 const hasPerf = perf && perf.total_time_sec != null;
                 const isExpanded = expandedPerf.has(d.hash);
-                const statusLabel = String(d.status || "pending").trim().toLowerCase();
-                const isErrored = statusLabel === "error";
-                const isInProgress = IN_PROGRESS_STATUSES.has(statusLabel);
-                const isCompleted = COMPLETED_STATUSES.has(statusLabel);
+                const statusLabel = normalizeStatus(d.status || "pending") || "pending";
+                const jobInfo = d.hash ? jobInfoByHash.get(d.hash) : null;
+                const jobStatusLabel = normalizeStatus(jobInfo?.status || jobInfo?.job_status || "");
+                const jobProgress = jobInfo?.progress;
+                const isErrored = ERROR_STATUSES.has(statusLabel) || ERROR_STATUSES.has(jobStatusLabel) || Boolean(d.error);
+                const isInProgress = !isErrored && (
+                  IN_PROGRESS_STATUSES.has(statusLabel) ||
+                  IN_PROGRESS_STATUSES.has(jobStatusLabel)
+                );
+                const isCompleted = COMPLETED_STATUSES.has(statusLabel) || COMPLETED_STATUSES.has(jobStatusLabel);
                 const canPreviewInHeader = Boolean(d.hash && !isErrored && !isInProgress);
                 const showStatusPill = !canPreviewInHeader;
                 const showRetry = isErrored && Boolean(d.hash);
                 const showPerf = hasPerf && isCompleted;
                 const isDeleting = deletingHash === d.hash;
-                const jobInfo = d.hash ? jobInfoByHash.get(d.hash) : null;
-                const jobProgress = jobInfo?.progress;
                 const showDocProgress = isInProgress && jobProgress && typeof jobProgress.percent === "number";
                 const docProgressPercent = clampPercent(jobProgress?.percent, 0);
                 const docProgressWidth = docProgressPercent;
-                const docProgressLabel = formatProgressDetails(jobProgress) || statusLabel.toUpperCase();
+                const pillLabel = jobStatusLabel || statusLabel;
+                const docProgressLabel = formatProgressDetails(jobProgress) || formatStatusLabel(pillLabel) || formatStatusLabel(statusLabel);
                 
                 return (
                   <li key={d.hash || d.stored_name || d.name} style={styles.listItem}>
@@ -878,7 +908,7 @@ export default function IngestPage({ systemStatus = {} }) {
                             {previewLoading && selectedDoc && selectedDoc.hash === d.hash ? "Loading…" : "Preview"}
                           </button>
                         ) : showStatusPill ? (
-                          <span style={styles.docStatusPill}>{statusLabel.toUpperCase()}</span>
+                          <span style={styles.docStatusPill}>{formatStatusLabel(pillLabel)}</span>
                         ) : null}
                         <button
                           type="button"
