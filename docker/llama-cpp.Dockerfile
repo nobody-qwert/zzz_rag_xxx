@@ -26,6 +26,10 @@ RUN ln -s /usr/local/cuda/lib64/stubs/libcuda.so /usr/lib/x86_64-linux-gnu/libcu
       "sse-starlette>=2.0.0" \
   && rm /usr/lib/x86_64-linux-gnu/libcuda.so /usr/lib/x86_64-linux-gnu/libcuda.so.1
 
-WORKDIR /models
+WORKDIR /app
 
-CMD ["python3", "-m", "llama_cpp.server", "--help"]
+COPY docker/llm_controller.py /app/llm_controller.py
+
+ENV PYTHONPATH="/app:${PYTHONPATH}"
+
+CMD ["python3", "/app/llm_controller.py"]

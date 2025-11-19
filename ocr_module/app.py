@@ -100,6 +100,8 @@ class OCRJob:
 
 
 jobs: Dict[str, OCRJob] = {}
+_ocr_loaded = False
+_ocr_lock = asyncio.Lock()
 
 
 class ParseResponse(BaseModel):
@@ -297,10 +299,76 @@ async def warmup_route() -> Dict[str, Any]:
             formula_enable=MINERU_FORMULA_ENABLE,
             tmp_dir=OCR_WARMUP_DIR,
         )
+        global _ocr_loaded
+        _ocr_loaded = True
         return {"warmup_complete": True, **info}
     except Exception as exc:
         logger.exception("MinerU warmup failed")
         raise HTTPException(status_code=500, detail=f"MinerU warmup failed: {exc}") from exc
+
+
+async def _load_ocr_models() -> Dict[str, Any]:
+    global _ocr_loaded
+    async with _ocr_lock:
+        if _ocr_loaded:
+            return {"state": "loaded", "already_loaded": True}
+        info = await asyncio.to_thread(
+            warmup_mineru,
+            parse_method=MINERU_PARSE_METHOD,
+            lang=MINERU_LANG,
+            table_enable=MINERU_TABLE_ENABLE,
+            formula_enable=MINERU_FORMULA_ENABLE,
+            tmp_dir=OCR_WARMUP_DIR,
+        )
+        _ocr_loaded = True
+        return {"state": "loaded", **info}
+
+
+async def _unload_ocr_models() -> Dict[str, Any]:
+    global _ocr_loaded
+    async with _ocr_lock:
+        if not _ocr_loaded:
+            return {"state": "unloaded", "already_unloaded": True}
+        warning: Optional[str] = None
+        try:
+            import torch  # type: ignore
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                ipc_collect = getattr(torch.cuda, "ipc_collect", None)
+                if callable(ipc_collect):
+                    ipc_collect()
+        except Exception as exc:  # pragma: no cover - best effort GPU cleanup
+            warning = str(exc)
+        finally:
+            _ocr_loaded = False
+        payload: Dict[str, Any] = {"state": "unloaded"}
+        if warning:
+            payload["warning"] = warning
+        return payload
+
+
+@app.post("/control/load")
+async def control_load() -> Dict[str, Any]:
+    try:
+        return await _load_ocr_models()
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.exception("Failed to load OCR models")
+        raise HTTPException(status_code=500, detail=f"Failed to load OCR models: {exc}") from exc
+
+
+@app.post("/control/unload")
+async def control_unload() -> Dict[str, Any]:
+    try:
+        return await _unload_ocr_models()
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.exception("Failed to unload OCR models")
+        raise HTTPException(status_code=500, detail=f"Failed to unload OCR models: {exc}") from exc
+
+
+@app.get("/control/status")
+async def control_status() -> Dict[str, Any]:
+    return {"state": "loaded" if _ocr_loaded else "unloaded"}
 
 
 if __name__ == "__main__":

@@ -16,13 +16,13 @@ try:
     from ..chunking import ChunkWindowSpec, chunk_text_multi
     from ..embeddings import EmbeddingClient
     from ..persistence import EmbeddingRow
-    from ..dependencies import document_store, jobs_registry, settings
+    from ..dependencies import document_store, jobs_registry, settings, gpu_phase_manager
     from ..utils.files import safe_filename
 except ImportError:  # pragma: no cover
     from chunking import ChunkWindowSpec, chunk_text_multi  # type: ignore
     from embeddings import EmbeddingClient  # type: ignore
     from persistence import EmbeddingRow  # type: ignore
-    from dependencies import document_store, jobs_registry, settings  # type: ignore
+    from dependencies import document_store, jobs_registry, settings, gpu_phase_manager  # type: ignore
     from utils.files import safe_filename  # type: ignore
 
 logger = logging.getLogger(__name__)
@@ -305,6 +305,24 @@ async def _process_job(job_id: str, docs: Sequence[_QueuedBatchDoc]) -> None:
     doc_entries = info.get("docs", [])
     doc_by_hash = {entry.get("hash"): entry for entry in doc_entries}
     info["status"] = "running"
+    ocr_phase_acquired = False
+    llm_phase_restored = False
+
+    try:
+        await gpu_phase_manager.switch_to_ocr(reason=f"ingest:{job_id}")
+        ocr_phase_acquired = True
+    except Exception as exc:
+        error_msg = f"GPU not available for OCR: {exc}"
+        _set_job_progress(job_id, "error", 0.0, stage="gpu_unavailable", message=error_msg)
+        for entry in doc_entries:
+            entry["status"] = "error"
+            _update_doc_progress(entry, "error", 0.0, stage="gpu_unavailable", error=error_msg)
+        for doc in docs:
+            if doc.job_record_id:
+                await document_store.finish_job(doc.job_record_id, "error", error=error_msg)
+        info["status"] = "error"
+        return
+
     _set_job_progress(job_id, "ocr", 0.0, stage="starting", total_docs=total_docs)
 
     ocr_payloads: Dict[str, Dict[str, Any]] = {}
@@ -372,6 +390,22 @@ async def _process_job(job_id: str, docs: Sequence[_QueuedBatchDoc]) -> None:
         finally:
             percent = (index / total_docs) * 50.0
             _set_job_progress(job_id, "ocr", percent, stage=f"{index}/{total_docs}")
+
+    try:
+        await gpu_phase_manager.switch_to_llm(reason=f"ingest:{job_id}")
+        llm_phase_restored = True
+    except Exception as exc:
+        error_msg = f"Failed to restore LLM after OCR: {exc}"
+        info["status"] = "error"
+        _set_job_progress(job_id, "error", 50.0, stage="llm_unavailable", message=error_msg)
+        for entry in doc_entries:
+            if entry.get("status") != "completed":
+                entry["status"] = "error"
+                _update_doc_progress(entry, "error", entry.get("progress", {}).get("percent", 0.0), stage="llm_unavailable", error=error_msg)
+        for doc in docs:
+            if doc.job_record_id:
+                await document_store.finish_job(doc.job_record_id, "error", error=error_msg)
+        return
 
     if not successful_docs:
         info["status"] = "error"

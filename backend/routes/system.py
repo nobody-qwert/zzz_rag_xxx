@@ -6,12 +6,12 @@ from typing import Any, Dict
 from fastapi import APIRouter
 
 try:
-    from ..dependencies import document_store, jobs_registry, settings
+    from ..dependencies import document_store, jobs_registry, settings, gpu_phase_manager
     from .helpers import format_document_row
     from ..services.ingestion import warmup_mineru
     from ..services.rag import warmup_llm
 except ImportError:  # pragma: no cover
-    from dependencies import document_store, jobs_registry, settings  # type: ignore
+    from dependencies import document_store, jobs_registry, settings, gpu_phase_manager  # type: ignore
     from routes.helpers import format_document_row  # type: ignore
     from services.ingestion import warmup_mineru  # type: ignore
     from services.rag import warmup_llm  # type: ignore
@@ -95,6 +95,7 @@ async def system_status() -> dict:
         for jid, info in jobs_registry.items()
         if info.get("status") in {"queued", "running"}
     ]
+    gpu_phase = gpu_phase_manager.snapshot()
 
     def _job_payload(jid: str, info: Dict[str, Any]) -> Dict[str, Any]:
         docs = info.get("docs") or []
@@ -116,8 +117,9 @@ async def system_status() -> dict:
         "docs_count": sum(1 for doc in docs if str(doc.get("status")).lower() == "processed"),
         "total_docs": len(docs),
         "jobs": [_job_payload(jid, info) for jid, info in jobs_registry.items()],
+        "gpu_phase": gpu_phase,
         "documents": [format_document_row(doc) for doc in docs],
-        "llm_ready": False,
+        "llm_ready": gpu_phase.get("state") == "llm",
         "settings": _settings_snapshot(),
     }
 

@@ -51,6 +51,9 @@ class AppSettings:
     llm_min_p: Optional[float]
     llm_repeat_penalty: Optional[float]
     ocr_status_poll_interval: float
+    llm_control_url: Optional[str]
+    ocr_control_url: Optional[str]
+    gpu_phase_timeout: float
 
 
 def _int_env(name: str, default: str) -> int:
@@ -110,12 +113,19 @@ def load_settings() -> AppSettings:
         ),
     )
 
+    ocr_module_url = _str_env("OCR_MODULE_URL", "http://ocr-module:8000").rstrip("/")
+    llm_control_url = _str_env("LLM_CONTROL_URL")
+    if not llm_control_url:
+        llm_endpoint = (os.environ.get("LLM_ENDPOINT") or "llm_small").strip() or "llm_small"
+        llm_control_url = f"http://{llm_endpoint}:9000/control"
+    ocr_control_url = _str_env("OCR_CONTROL_URL", f"{ocr_module_url}/control")
+
     return AppSettings(
         data_dir=data_dir,
         index_dir=index_dir,
         doc_store_path=doc_store_path,
         ocr_parser_key=ocr_parser_key,
-        ocr_module_url=_str_env("OCR_MODULE_URL", "http://ocr-module:8000").rstrip("/"),
+        ocr_module_url=ocr_module_url,
         ocr_module_timeout=_float_env("OCR_MODULE_TIMEOUT", "120"),
         chat_context_window=llm_context_size,
         chat_completion_max_tokens=chat_completion_max_tokens,
@@ -150,6 +160,9 @@ def load_settings() -> AppSettings:
         llm_min_p=_optional_float_env("LLM_MIN_P"),
         llm_repeat_penalty=_optional_float_env("LLM_REPEAT_PENALTY"),
         ocr_status_poll_interval=ocr_status_poll_interval,
+        llm_control_url=llm_control_url.strip() or None,
+        ocr_control_url=ocr_control_url.strip() or None,
+        gpu_phase_timeout=_float_env("GPU_PHASE_TIMEOUT", "60"),
     )
 
 

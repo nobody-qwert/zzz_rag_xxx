@@ -13,7 +13,7 @@ try:
     from ..embeddings import EmbeddingClient
     from ..schemas import AskRequest, AskResponse
     from ..token_utils import estimate_messages_tokens, estimate_tokens, truncate_text_to_tokens
-    from ..dependencies import document_store, settings
+    from ..dependencies import document_store, settings, gpu_phase_manager
     from ..utils.conversation import (
         build_distilled_query,
         render_context,
@@ -25,7 +25,7 @@ except ImportError:  # pragma: no cover
     from embeddings import EmbeddingClient  # type: ignore
     from schemas import AskRequest, AskResponse  # type: ignore
     from token_utils import estimate_messages_tokens, estimate_tokens, truncate_text_to_tokens  # type: ignore
-    from dependencies import document_store, settings  # type: ignore
+    from dependencies import document_store, settings, gpu_phase_manager  # type: ignore
     from utils.conversation import (  # type: ignore
         build_distilled_query,
         render_context,
@@ -128,6 +128,7 @@ async def _prepare_question_payload(
         raise HTTPException(status_code=500, detail="Failed to embed query")
 
     query_vec = distilled_vec
+    await gpu_phase_manager.ensure_llm_ready()
     try:
         hyde_start = time.perf_counter()
         await _emit_step("started", "HyDE LLM", "llm", order=step_counter)
@@ -358,6 +359,7 @@ async def ask_question(req: AskRequest) -> AskResponse:
         time_to_first_token = time.perf_counter() - call_start
         generation_seconds = time_to_first_token
     else:
+        await gpu_phase_manager.ensure_llm_ready()
         try:
             from openai import AsyncOpenAI  # type: ignore
 
@@ -429,6 +431,7 @@ async def warmup_llm() -> Dict[str, Any]:
     if not settings.llm_base_url or not settings.llm_api_key or not settings.llm_model:
         return {"warmup_complete": False, "error": "LLM env missing"}
     try:
+        await gpu_phase_manager.ensure_llm_ready()
         from openai import AsyncOpenAI  # type: ignore
 
         client = AsyncOpenAI(base_url=settings.llm_base_url, api_key=settings.llm_api_key)
@@ -593,6 +596,8 @@ async def stream_question(req: AskRequest):
             steps.append({"name": "Embed distilled query", "kind": "embedding", "duration_seconds": duration, "order": order})
             yield _json_line({"type": "step", "step": {**steps[-1], "state": "done"}})
             order += 1
+
+            await gpu_phase_manager.ensure_llm_ready()
 
             # Step 2: HyDE LLM
             hyde_text: Optional[str]
@@ -773,6 +778,7 @@ async def stream_question(req: AskRequest):
                 generation_seconds = time_to_first_token
                 yield _json_line({"type": "token", "content": final_answer})
             else:
+                await gpu_phase_manager.ensure_llm_ready()
                 from openai import AsyncOpenAI  # type: ignore
 
                 client = AsyncOpenAI(base_url=settings.llm_base_url, api_key=settings.llm_api_key)

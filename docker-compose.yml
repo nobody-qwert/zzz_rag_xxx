@@ -21,6 +21,9 @@ services:
       OCR_MODULE_URL: ${OCR_MODULE_URL:-http://ocr-module:8000}
       OCR_MODULE_TIMEOUT: ${OCR_MODULE_TIMEOUT:-180}
       OCR_PARSER_KEY: ${OCR_PARSER_KEY:-mineru}
+      LLM_CONTROL_URL: ${LLM_CONTROL_URL:-http://${LLM_ENDPOINT:-llm_small}:9000/control}
+      OCR_CONTROL_URL: ${OCR_CONTROL_URL:-http://ocr-module:8000/control}
+      GPU_PHASE_TIMEOUT: ${GPU_PHASE_TIMEOUT:-60}
     volumes:
       - ${HOST_APP_DATA:-./app_data}:${APP_DATA_ROOT:-/app_data}
     ports:
@@ -66,20 +69,11 @@ services:
       context: .
       dockerfile: docker/llama-cpp.Dockerfile
     image: local/llama-cpp:latest
-    command: >
-      python3 -m llama_cpp.server
-      --model /models/llm/Qwen3-4B-Instruct-2507-Q8_0.gguf
-      --model_alias default
-      --host 0.0.0.0
-      --port 8000
-      --chat_format chatml
-      --n_ctx ${CHAT_CONTEXT_SIZE:-20000}
-      --flash_attn true
-      --n_gpu_layers -1
-      --use_mlock true
-      --api_key ${LLM_API_KEY:-local-llm}
     environment:
       LLAMA_CUBLAS: "1"
+      LLM_CONTROL_PORT: 9000
+      LLM_SERVER_CMD: >-
+        python3 -m llama_cpp.server --model /models/llm/Qwen3-4B-Instruct-2507-Q8_0.gguf --model_alias default --host 0.0.0.0 --port 8000 --chat_format chatml --n_ctx ${CHAT_CONTEXT_SIZE:-20000} --flash_attn true --n_gpu_layers -1 --use_mlock true --api_key ${LLM_API_KEY:-local-llm}
     deploy:
       resources:
         reservations:
@@ -99,21 +93,12 @@ services:
       context: .
       dockerfile: docker/llama-cpp.Dockerfile
     image: local/llama-cpp:latest
-    command: >
-      python3 -m llama_cpp.server
-      --model /models/llm/Qwen3-30B-A3B-Instruct-2507-Q4_K_M.gguf
-      --model_alias default
-      --host 0.0.0.0
-      --port 8000
-      --chat_format chatml
-      --n_ctx ${CHAT_CONTEXT_SIZE:-20000}
-      --n_gpu_layers -1
-      --flash_attn true
-      --use_mlock true
-      --api_key ${LLM_API_KEY:-local-llm}
 
     environment:
       LLAMA_CUBLAS: "1"
+      LLM_CONTROL_PORT: 9000
+      LLM_SERVER_CMD: >-
+        python3 -m llama_cpp.server --model /models/llm/Qwen3-30B-A3B-Instruct-2507-Q4_K_M.gguf --model_alias default --host 0.0.0.0 --port 8000 --chat_format chatml --n_ctx ${CHAT_CONTEXT_SIZE:-20000} --n_gpu_layers -1 --flash_attn true --use_mlock true --api_key ${LLM_API_KEY:-local-llm}
     deploy:
       resources:
         reservations:
