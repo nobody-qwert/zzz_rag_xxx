@@ -14,6 +14,54 @@ from pydantic import BaseModel, Field
 from mineru_wrapper import run_mineru, warmup_mineru
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+
+def _startup_logger() -> logging.Logger:
+    """Prefer uvicorn's error logger so INFO shows in docker logs."""
+    uvicorn_logger = logging.getLogger("uvicorn.error")
+    if uvicorn_logger.hasHandlers():
+        return uvicorn_logger
+    return logger
+
+
+def _log_cuda_status() -> None:
+    """Log whether CUDA is available when the service boots."""
+    log = _startup_logger()
+    try:
+        import torch  # type: ignore
+    except Exception as exc:
+        log.info("CUDA check skipped: torch unavailable (%s)", exc)
+        return
+
+    try:
+        available = bool(torch.cuda.is_available())
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log.warning("CUDA check failed: %s", exc)
+        return
+
+    if not available:
+        torch_cuda = getattr(getattr(torch, "version", None), "cuda", None)
+        log.info("CUDA available: False (torch cuda=%s)", torch_cuda or "unknown")
+        return
+
+    try:
+        device_idx = torch.cuda.current_device()
+        device_name = torch.cuda.get_device_name(device_idx)
+        device_count = torch.cuda.device_count()
+        capability = torch.cuda.get_device_capability(device_idx)
+        total_mem_gb = torch.cuda.get_device_properties(device_idx).total_memory / (1024**3)
+        log.info(
+            "CUDA available: True (devices=%s, active=%s '%s', %.1f GB, capability=%s.%s)",
+            device_count,
+            device_idx,
+            device_name,
+            total_mem_gb,
+            capability[0],
+            capability[1],
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log.info("CUDA available: True (device inspection failed: %s)", exc)
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -129,6 +177,7 @@ class JobStatusResponse(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _log_cuda_status()
     if MINERU_WARMUP_ON_STARTUP:
         async def _do_warmup() -> None:
             try:
