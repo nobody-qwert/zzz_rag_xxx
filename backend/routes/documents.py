@@ -24,10 +24,37 @@ async def list_documents() -> List[Dict[str, Any]]:
     results: List[Dict[str, Any]] = []
     for doc in docs:
         doc_data = format_document_row(doc)
+        doc_hash = doc.get("doc_hash")
         status = str(doc_data.get("status") or "").strip().lower()
-        if doc.get("doc_hash") and status in settings.completed_doc_statuses:
-            metrics = await document_store.get_performance_metrics(doc["doc_hash"])
+
+        ocr_available = False
+        ocr_created_at: Optional[str] = None
+        small_embeddings = 0
+        large_embeddings = 0
+        total_embeddings = 0
+
+        if doc_hash:
+            extraction = await document_store.get_extraction(doc_hash, settings.ocr_parser_key)
+            if extraction:
+                ocr_available = True
+                ocr_created_at = extraction.get("created_at")
+
+            embedding_counts = await document_store.count_embeddings_by_config(doc_hash)
+            small_embeddings = int(embedding_counts.get(settings.chunk_config_small_id, 0))
+            large_embeddings = int(embedding_counts.get(settings.chunk_config_large_id, 0))
+            total_embeddings = int(sum(embedding_counts.values()))
+
+        doc_data["ocr_available"] = ocr_available
+        doc_data["ocr_extracted_at"] = ocr_created_at
+        doc_data["small_embeddings"] = small_embeddings
+        doc_data["large_embeddings"] = large_embeddings
+        doc_data["total_embeddings"] = total_embeddings
+        doc_data["embedding_available"] = total_embeddings > 0
+
+        if doc_hash and status in settings.completed_doc_statuses:
+            metrics = await document_store.get_performance_metrics(doc_hash)
             doc_data["performance"] = metrics
+
         results.append(doc_data)
     return results
 

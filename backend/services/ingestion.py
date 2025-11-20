@@ -107,7 +107,7 @@ async def retry_ingest(doc_hash: str) -> Dict[str, Any]:
     }
 
 
-async def reprocess_after_ocr(doc_hash: str) -> Dict[str, Any]:
+async def reprocess_after_ocr(doc_hash: str, *, ensure_gpu_phase: bool = True) -> Dict[str, Any]:
     """Re-run chunking and embeddings using existing OCR text."""
     doc = await document_store.get_document(doc_hash)
     if not doc:
@@ -129,6 +129,12 @@ async def reprocess_after_ocr(doc_hash: str) -> Dict[str, Any]:
     ocr_text = (extraction.get("text") or "").strip()
     if not ocr_text:
         raise HTTPException(status_code=400, detail="OCR extraction is empty; re-run OCR first")
+
+    if ensure_gpu_phase:
+        try:
+            await gpu_phase_manager.switch_to_ocr(reason=f"reprocess:{doc_hash}")
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail=f"GPU not available for preprocessing: {exc}") from exc
 
     await document_store.update_document_status(doc_hash, "processing")
 
@@ -229,6 +235,11 @@ async def reprocess_all_documents() -> Dict[str, Any]:
         if total == 0:
             return {"total": 0, "processed": 0, "skipped": 0, "failed": 0, "results": []}
 
+        try:
+            await gpu_phase_manager.switch_to_ocr(reason="reprocess_all")
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail=f"GPU not available for preprocessing: {exc}") from exc
+
         results: List[Dict[str, Any]] = []
         processed = 0
         skipped = 0
@@ -240,7 +251,7 @@ async def reprocess_all_documents() -> Dict[str, Any]:
                 results.append({"hash": None, "status": "skipped", "reason": "missing_hash"})
                 continue
             try:
-                payload = await reprocess_after_ocr(doc_hash)
+                payload = await reprocess_after_ocr(doc_hash, ensure_gpu_phase=False)
                 processed += 1
                 results.append(
                     {
@@ -474,7 +485,6 @@ async def _process_job(job_id: str, docs: Sequence[_QueuedBatchDoc]) -> None:
     doc_by_hash = {entry.get("hash"): entry for entry in doc_entries}
     info["status"] = "running"
     ocr_phase_acquired = False
-    llm_phase_restored = False
 
     try:
         await gpu_phase_manager.switch_to_ocr(reason=f"ingest:{job_id}")
@@ -558,22 +568,6 @@ async def _process_job(job_id: str, docs: Sequence[_QueuedBatchDoc]) -> None:
         finally:
             percent = (index / total_docs) * 50.0
             _set_job_progress(job_id, "ocr", percent, stage=f"{index}/{total_docs}")
-
-    try:
-        await gpu_phase_manager.switch_to_llm(reason=f"ingest:{job_id}")
-        llm_phase_restored = True
-    except Exception as exc:
-        error_msg = f"Failed to restore LLM after OCR: {exc}"
-        info["status"] = "error"
-        _set_job_progress(job_id, "error", 50.0, stage="llm_unavailable", message=error_msg)
-        for entry in doc_entries:
-            if entry.get("status") != "completed":
-                entry["status"] = "error"
-                _update_doc_progress(entry, "error", entry.get("progress", {}).get("percent", 0.0), stage="llm_unavailable", error=error_msg)
-        for doc in docs:
-            if doc.job_record_id:
-                await document_store.finish_job(doc.job_record_id, "error", error=error_msg)
-        return
 
     if not successful_docs:
         info["status"] = "error"

@@ -149,6 +149,19 @@ const styles = {
   docStatusPill: { fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, padding: "2px 8px", borderRadius: 999, border: "1px solid rgba(148, 163, 184, 0.22)", color: "rgba(148, 163, 184, 0.85)" },
   docMetaRow: { display: "flex", flexWrap: "wrap", gap: 2, fontSize: 12, color: "rgba(148, 163, 184, 0.9)", marginTop: 0, lineHeight: 1.25 },
   docMetaItem: { whiteSpace: "nowrap" },
+  docStageRow: { display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 },
+  docStageBadge: {
+    fontSize: 10,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+    padding: "3px 10px",
+    borderRadius: 999,
+    border: "1px solid rgba(148, 163, 184, 0.32)",
+    color: "rgba(226, 232, 240, 0.85)",
+  },
+  docStageReady: { background: "rgba(34, 197, 94, 0.16)", borderColor: "rgba(34, 197, 94, 0.45)", color: "rgba(209, 250, 229, 0.95)" },
+  docStagePending: { background: "rgba(59, 130, 246, 0.12)", borderColor: "rgba(59, 130, 246, 0.45)", color: "rgba(191, 219, 254, 0.95)" },
+  docStageError: { background: "rgba(248, 113, 113, 0.14)", borderColor: "rgba(248, 113, 113, 0.55)", color: "rgba(254, 226, 226, 0.92)" },
   docActions: { display: "flex", justifyContent: "flex-end", gap: 1, marginTop: 2 },
   docPreviewButton: { font: "inherit", fontSize: 13, padding: "6px 18px", borderRadius: 999, border: "none", background: "linear-gradient(135deg, rgba(165, 180, 252, 0.55), rgba(99, 102, 241, 0.32))", color: "rgba(226, 232, 240, 0.98)", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", boxShadow: "0 16px 28px rgba(3, 6, 19, 0.5)" },
   dangerIconButton: { font: "inherit", fontSize: 16, lineHeight: 1, width: 28, height: 28, borderRadius: 14, border: "none", background: "rgba(252, 165, 165, 0.28)", color: "rgba(255, 241, 242, 0.96)", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0, boxShadow: "0 14px 26px rgba(239, 68, 68, 0.38)" },
@@ -259,6 +272,7 @@ export default function IngestPage({ systemStatus = {} }) {
     docs: "/api/documents",
     status: (jobId) => `/api/status/${jobId}`,
     retry: (hash) => `/api/ingest/${hash}/retry`,
+    preprocess: (hash) => `/api/ingest/${hash}/preprocess`,
     reprocessAll: "/api/ingest/reprocess_all",
     previewText: (hash, maxChars = null, parser = FALLBACK_PARSER) => {
       const params = new URLSearchParams({ parser });
@@ -277,6 +291,7 @@ export default function IngestPage({ systemStatus = {} }) {
   const [uploadProgress, setUploadProgress] = useState([]);
   const [activeJobs, setActiveJobs] = useState(new Set());
   const [retryingHash, setRetryingHash] = useState(null);
+  const [reprocessingHash, setReprocessingHash] = useState(null);
   const [reprocessingAll, setReprocessingAll] = useState(false);
   const [deletingHash, setDeletingHash] = useState(null);
   const [selectedDoc, setSelectedDoc] = useState(null);
@@ -348,6 +363,83 @@ export default function IngestPage({ systemStatus = {} }) {
     }
     return map;
   }, [systemStatus.jobs]);
+
+  const jobQueueEntries = useMemo(() => {
+    if (!Array.isArray(systemStatus.jobs)) return [];
+    const entries = [];
+    systemStatus.jobs.forEach((job) => {
+      if (!job) return;
+      const jobStatus = normalizeStatus(job.status);
+      if (!jobStatus || !IN_PROGRESS_STATUSES.has(jobStatus)) return;
+      const docsList = Array.isArray(job.docs) ? job.docs : [];
+      docsList.forEach((doc, idx) => {
+        if (!doc) return;
+        const docStatus = normalizeStatus(doc.status);
+        if (docStatus && (COMPLETED_STATUSES.has(docStatus) || ERROR_STATUSES.has(docStatus))) {
+          return;
+        }
+        const docHash = doc.hash || doc.doc_hash || doc.docHash;
+        const docName = doc.file || doc.name || docHash || `Document ${idx + 1}`;
+        entries.push({
+          key: docHash || `job:${job.job_id}:${idx}`,
+          id: docHash || `job:${job.job_id}:${idx}`,
+          name: docName,
+          status: doc.status || job.status || "processing",
+          jobId: job.job_id,
+          jobHash: docHash || null,
+          jobProgress: (doc.progress && typeof doc.progress === "object") ? doc.progress : job.progress || null,
+          source: "job",
+        });
+      });
+    });
+    return entries;
+  }, [systemStatus.jobs]);
+
+  const documentQueueEntries = useMemo(() => {
+    const docsList = Array.isArray(systemStatus.documents) ? systemStatus.documents : [];
+    return docsList
+      .filter((doc) => IN_PROGRESS_STATUSES.has(normalizeStatus(doc?.status)))
+      .map((doc, idx) => {
+        const docHash = doc.hash || doc.doc_hash || doc.docHash;
+        const key = docHash || doc.stored_name || doc.name || `doc:${idx}`;
+        return {
+          key,
+          id: key,
+          name: doc.name || doc.stored_name || docHash || `Document ${idx + 1}`,
+          status: doc.status || "processing",
+          jobId: null,
+          jobHash: docHash || null,
+          jobProgress: { phase: doc.status, stage: doc.status },
+          source: "doc",
+        };
+      });
+  }, [systemStatus.documents]);
+
+  const combinedProgressEntries = useMemo(() => {
+    const seen = new Set();
+    const results = [];
+
+    const addEntry = (entry) => {
+      if (!entry) return;
+      const key = entry.key || entry.jobHash || entry.id || entry.name;
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      results.push(entry);
+    };
+
+    jobQueueEntries.forEach(addEntry);
+    uploadProgress.forEach((entry, idx) => {
+      if (!entry) return;
+      const key = entry.jobHash || `upload:${entry.jobId || entry.id || idx}`;
+      addEntry({ ...entry, key, id: key });
+    });
+    documentQueueEntries.forEach(addEntry);
+
+    return results;
+  }, [jobQueueEntries, uploadProgress, documentQueueEntries]);
+
+  const hasProcessingQueue = combinedProgressEntries.length > 0 || reprocessingAll || activeJobs.size > 0;
+  const uploadBadgeLabel = uploading ? "Uploading" : hasProcessingQueue ? "Processing" : "Ready";
 
   const handleUploadAll = async () => {
     if (files.length === 0) { setUploadStatus("Select files first."); return; }
@@ -458,6 +550,29 @@ export default function IngestPage({ systemStatus = {} }) {
     catch (e) { setUploadStatus(`Retry failed: ${e.message || String(e)}`); }
     finally { setRetryingHash(null); }
   }, [api, refreshDocs]);
+
+  const handleRetryPreprocess = useCallback(async (hash) => {
+    if (!hash) return;
+    setReprocessingHash(hash);
+    const short = shortHash(hash);
+    setUploadStatus(`Retrying preprocessing for ${short}...`);
+    try {
+      const res = await fetch(api.preprocess(hash), { method: "POST" });
+      const data = await readJsonSafe(res);
+      if (!res.ok) throw new Error((data && (data.detail || data.error || data.raw)) || res.statusText);
+      const chunkCount = Number(data.chunk_count ?? data.total_chunks ?? data.small_chunks ?? 0) || 0;
+      const embCount = Number(data.total_embeddings ?? data.embedding_count ?? 0) || 0;
+      const summary = [`Preprocessing complete for ${short}`];
+      if (chunkCount > 0) summary.push(`${chunkCount} chunk${chunkCount === 1 ? "" : "s"}`);
+      if (embCount > 0) summary.push(`${embCount} embedding${embCount === 1 ? "" : "s"}`);
+      setUploadStatus(summary.join(" • "));
+      void refreshDocs();
+    } catch (e) {
+      setUploadStatus(`Preprocess retry failed: ${e.message || String(e)}`);
+    } finally {
+      setReprocessingHash(null);
+    }
+  }, [api.preprocess, refreshDocs]);
 
   const handleReprocessAll = useCallback(async () => {
     setReprocessingAll(true);
@@ -669,7 +784,7 @@ export default function IngestPage({ systemStatus = {} }) {
         <section style={{ ...styles.card, ...styles.uploadCard }}>
           <div style={styles.sectionHeader}>
             <h3 style={styles.sectionTitle}>Upload Documents</h3>
-            <span style={styles.badge}>{uploading ? "Uploading" : activeJobs.size > 0 ? "Processing" : "Ready"}</span>
+            <span style={styles.badge}>{uploadBadgeLabel}</span>
           </div>
           <div style={styles.row}>
             <input 
@@ -692,9 +807,9 @@ export default function IngestPage({ systemStatus = {} }) {
           </div>
           
           {/* Upload Progress */}
-          {uploadProgress.length > 0 && (
+          {combinedProgressEntries.length > 0 && (
             <div style={styles.uploadProgressList}>
-              {uploadProgress.map((p) => {
+              {combinedProgressEntries.map((p) => {
                 const uploadWidth = clampPercent(p.jobProgress?.percent, 0);
                 const uploadLabel = formatProgressDetails(p.jobProgress) || p.status;
                 const normalizedStatus = typeof p.status === "string" ? p.status.toLowerCase() : "";
@@ -708,7 +823,7 @@ export default function IngestPage({ systemStatus = {} }) {
                 })();
                 return (
                   <div 
-                    key={p.id} 
+                    key={p.key || p.id || p.jobHash || p.name} 
                     style={{ 
                     fontSize: 12, 
                     padding: "8px 14px", 
@@ -923,6 +1038,32 @@ export default function IngestPage({ systemStatus = {} }) {
                 const docProgressWidth = docProgressPercent;
                 const pillLabel = jobStatusLabel || statusLabel;
                 const docProgressLabel = formatProgressDetails(jobProgress) || formatStatusLabel(pillLabel) || formatStatusLabel(statusLabel);
+                const ocrAvailable = Boolean(d.ocr_available);
+                const embeddingsAvailable = Boolean(d.embedding_available);
+                const totalEmbeddings = Number(d.total_embeddings ?? 0) || 0;
+                const smallEmbeddings = Number(d.small_embeddings ?? 0) || 0;
+                const largeEmbeddings = Number(d.large_embeddings ?? Math.max(0, totalEmbeddings - smallEmbeddings)) || 0;
+                const ocrBadgeLabel = ocrAvailable ? "OCR READY" : isErrored ? "OCR ERROR" : "OCR PENDING";
+                const embedBadgeLabel = embeddingsAvailable
+                  ? `EMBED READY${totalEmbeddings ? ` (${totalEmbeddings})` : ""}`
+                  : isErrored && ocrAvailable
+                    ? "EMBED ERROR"
+                    : ocrAvailable
+                      ? "EMBED PENDING"
+                      : "EMBED WAITING";
+                const ocrBadgeStyle = ocrAvailable
+                  ? styles.docStageReady
+                  : isErrored
+                    ? styles.docStageError
+                    : styles.docStagePending;
+                const embedBadgeStyle = embeddingsAvailable
+                  ? styles.docStageReady
+                  : isErrored && ocrAvailable
+                    ? styles.docStageError
+                    : styles.docStagePending;
+                const showRetryOcr = showRetry && !ocrAvailable;
+                const showRetryPreprocess = showRetry && ocrAvailable && !embeddingsAvailable;
+                const showGeneralRetry = showRetry && !showRetryOcr && !showRetryPreprocess;
                 
                 return (
                   <li key={d.hash || d.stored_name || d.name} style={styles.listItem}>
@@ -965,6 +1106,24 @@ export default function IngestPage({ systemStatus = {} }) {
                           <span style={{ opacity: 0.65 }}>Hash:</span> {shortHash(d.hash)}
                         </span>
                       )}
+                    </div>
+                    <div style={styles.docStageRow}>
+                      <span
+                        style={{ ...styles.docStageBadge, ...ocrBadgeStyle }}
+                        title={d.ocr_extracted_at ? `Extracted ${formatDate(d.ocr_extracted_at)}` : undefined}
+                      >
+                        {ocrBadgeLabel}
+                      </span>
+                      <span
+                        style={{ ...styles.docStageBadge, ...embedBadgeStyle }}
+                        title={
+                          embeddingsAvailable
+                            ? `Small: ${smallEmbeddings.toLocaleString()} | Large: ${largeEmbeddings.toLocaleString()}`
+                            : undefined
+                        }
+                      >
+                        {embedBadgeLabel}
+                      </span>
                     </div>
 
                     {(d.last_ingested_at || showPerf) && (
@@ -1037,13 +1196,35 @@ export default function IngestPage({ systemStatus = {} }) {
 
                     {showRetry && (
                       <div style={styles.docActions}>
-                        <button
-                          style={styles.subtleButton}
-                          onClick={() => handleRetry(d.hash)}
-                          disabled={retryingHash === d.hash}
-                        >
-                          {retryingHash === d.hash ? "Retrying…" : "Retry"}
-                        </button>
+                        {showRetryOcr && (
+                          <button
+                            style={styles.subtleButton}
+                            onClick={() => handleRetry(d.hash)}
+                            disabled={retryingHash === d.hash}
+                            title="Re-run OCR and ingestion from the source file"
+                          >
+                            {retryingHash === d.hash ? "Retrying OCR…" : "Retry OCR"}
+                          </button>
+                        )}
+                        {showRetryPreprocess && (
+                          <button
+                            style={styles.subtleButton}
+                            onClick={() => handleRetryPreprocess(d.hash)}
+                            disabled={reprocessingHash === d.hash}
+                            title="Re-run chunking and embeddings using saved OCR text"
+                          >
+                            {reprocessingHash === d.hash ? "Retrying…" : "Retry Preprocess"}
+                          </button>
+                        )}
+                        {showGeneralRetry && (
+                          <button
+                            style={styles.subtleButton}
+                            onClick={() => handleRetry(d.hash)}
+                            disabled={retryingHash === d.hash}
+                          >
+                            {retryingHash === d.hash ? "Retrying…" : "Retry"}
+                          </button>
+                        )}
                       </div>
                     )}
                   </li>
