@@ -65,7 +65,7 @@ function formatProgressDetails(progress) {
 const styles = {
   page: {
     display: "grid",
-    gridTemplateColumns: "var(--ingest-grid-columns, minmax(0, 1.65fr) minmax(320px, 0.95fr))",
+    gridTemplateColumns: "var(--ingest-grid-columns, minmax(0, 1.65fr) minmax(320px, 1.1875fr))",
     gap: 20,
     alignItems: "stretch",
     width: "100%",
@@ -112,7 +112,8 @@ const styles = {
     width: "100%",
     display: "flex",
     flexDirection: "column",
-    gap: 16,
+    gap: 8,
+    padding: "8px 10px",
     position: "var(--ingest-library-position, sticky)",
     top: "var(--ingest-library-top, 16px)",
     height: "var(--ingest-library-height, calc(100vh - 64px))",
@@ -126,6 +127,8 @@ const styles = {
   badge: { padding: "4px 10px", borderRadius: 999, border: "1px solid rgba(148, 163, 184, 0.4)", fontSize: 12, color: "rgba(148, 163, 184, 0.85)", whiteSpace: "nowrap" },
   row: { display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" },
   button: { font: "inherit", fontSize: 14, padding: "11px 24px", borderRadius: 999, border: "none", background: "linear-gradient(135deg, rgba(167, 139, 250, 0.94), rgba(59, 130, 246, 0.82))", color: "#f8f9ff", cursor: "pointer", boxShadow: "0 24px 44px rgba(5, 9, 25, 0.65)", transition: "transform 0.15s ease, box-shadow 0.15s ease" },
+  filePickerButton: { font: "inherit", fontSize: 14, padding: "11px 24px", borderRadius: 999, border: "none", background: "rgba(23, 28, 60, 0.98)", color: "rgba(248, 250, 255, 0.92)", cursor: "pointer", boxShadow: "0 0 0 2px rgba(59, 130, 246, 0.35), inset 0 2px 14px rgba(3, 6, 18, 0.7)", transition: "transform 0.15s ease, box-shadow 0.15s ease" },
+  hiddenFileInput: { display: "none" },
   subtleButton: { font: "inherit", fontSize: 13, padding: "8px 18px", borderRadius: 999, border: "none", background: "rgba(77, 88, 142, 0.96)", color: "rgba(248, 250, 255, 0.96)", cursor: "pointer", boxShadow: "0 18px 32px rgba(6, 9, 23, 0.62)", transition: "transform 0.15s ease, box-shadow 0.15s ease" },
   input: { font: "inherit", padding: "12px 20px", borderRadius: 999, border: "none", background: "rgba(23, 28, 60, 0.98)", color: "inherit", minWidth: 0, boxShadow: "0 0 0 2px rgba(59, 130, 246, 0.26), inset 0 2px 14px rgba(3, 6, 18, 0.7)", outline: "none" },
   feedback: { marginTop: 10, fontSize: 13, color: "rgba(148, 163, 184, 0.85)" },
@@ -137,8 +140,8 @@ const styles = {
     overflowX: "hidden",
     maxHeight: "var(--ingest-library-scroll-max-height, calc(100vh - 180px))",
     border: "none",
-    borderRadius: 26,
-    padding: 16,
+    borderRadius: 18,
+    padding: 4,
     background: "rgba(21, 26, 58, 0.97)",
     boxShadow: "0 24px 46px rgba(0, 0, 0, 0.6), inset 0 0 0 2px rgba(99, 102, 241, 0.11)",
   },
@@ -304,6 +307,7 @@ export default function IngestPage({ systemStatus = {} }) {
   const parser = FALLBACK_PARSER;
   const [expandedPerf, setExpandedPerf] = useState(new Set());
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const fileInputRef = useRef(null);
   const selectedDocRef = useRef(null);
   const lastPreviewParamsRef = useRef({ previewMaxChars, limitPreview });
 
@@ -437,9 +441,6 @@ export default function IngestPage({ systemStatus = {} }) {
 
     return results;
   }, [jobQueueEntries, uploadProgress, documentQueueEntries]);
-
-  const hasProcessingQueue = combinedProgressEntries.length > 0 || reprocessingAll || activeJobs.size > 0;
-  const uploadBadgeLabel = uploading ? "Uploading" : hasProcessingQueue ? "Processing" : "Ready";
 
   const handleUploadAll = async () => {
     if (files.length === 0) { setUploadStatus("Select files first."); return; }
@@ -762,6 +763,12 @@ export default function IngestPage({ systemStatus = {} }) {
     return () => clearInterval(id);
   }, [activeJobs, api, refreshDocs]);
 
+  const handleFilePickerClick = useCallback(() => {
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
+    }
+  }, []);
+
   const handleOpenChat = useCallback(() => {
     if (!canOpenChat) return;
     navigate("/chat");
@@ -782,18 +789,23 @@ export default function IngestPage({ systemStatus = {} }) {
       <div className="ingest-layout" style={styles.page}>
       <div style={styles.leftColumn}>
         <section style={{ ...styles.card, ...styles.uploadCard }}>
-          <div style={styles.sectionHeader}>
-            <h3 style={styles.sectionTitle}>Upload Documents</h3>
-            <span style={styles.badge}>{uploadBadgeLabel}</span>
-          </div>
-          <div style={styles.row}>
-            <input 
+          <div style={{ ...styles.row, marginBottom: 12 }}>
+            <input
+              ref={fileInputRef}
               type="file" 
               multiple 
               accept=".pdf,application/pdf"
               onChange={(e) => setFiles(Array.from(e.target.files || []))} 
-              style={styles.input} 
+              style={styles.hiddenFileInput}
             />
+            <button
+              type="button"
+              onClick={handleFilePickerClick}
+              disabled={uploading}
+              style={{ ...styles.filePickerButton, opacity: uploading ? 0.6 : 1 }}
+            >
+              Upload Files
+            </button>
             <button 
               onClick={handleUploadAll} 
               disabled={uploading || files.length === 0} 

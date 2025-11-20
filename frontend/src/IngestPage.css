@@ -1,6 +1,6 @@
 .ingest-layout {
   width: 100%;
-  --ingest-grid-columns: minmax(0, 1.65fr) minmax(320px, 0.95fr);
+  --ingest-grid-columns: minmax(0, 1.65fr) minmax(320px, 1.1875fr);
   --ingest-left-min-height: calc(100vh - 64px);
   --ingest-upload-height: 300px;
   --ingest-library-position: sticky;
@@ -12,7 +12,7 @@
 
 @media (max-width: 1250px) {
   .ingest-layout {
-    --ingest-grid-columns: minmax(0, 1.45fr) minmax(320px, 0.95fr);
+    --ingest-grid-columns: minmax(0, 1.45fr) minmax(320px, 1.1875fr);
   }
 }
 
