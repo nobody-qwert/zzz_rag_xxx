@@ -5,9 +5,21 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, File, UploadFile
 
 try:
-    from ..services.ingestion import get_job_status, ingest_files, retry_ingest
+    from ..services.ingestion import (
+        get_job_status,
+        ingest_files,
+        reprocess_after_ocr,
+        reprocess_all_documents,
+        retry_ingest,
+    )
 except ImportError:  # pragma: no cover
-    from services.ingestion import get_job_status, ingest_files, retry_ingest  # type: ignore
+    from services.ingestion import (  # type: ignore
+        get_job_status,
+        ingest_files,
+        reprocess_after_ocr,
+        reprocess_all_documents,
+        retry_ingest,
+    )
 
 router = APIRouter()
 
@@ -33,3 +45,13 @@ async def job_status(job_id: str) -> Dict[str, Any]:
 @router.post("/ingest/{doc_hash}/retry")
 async def retry_ingest_route(doc_hash: str) -> Dict[str, Any]:
     return await retry_ingest(doc_hash)
+
+
+@router.post("/ingest/{doc_hash}/preprocess")
+async def reprocess_doc_route(doc_hash: str) -> Dict[str, Any]:
+    return await reprocess_after_ocr(doc_hash)
+
+
+@router.post("/ingest/reprocess_all")
+async def reprocess_all_route() -> Dict[str, Any]:
+    return await reprocess_all_documents()

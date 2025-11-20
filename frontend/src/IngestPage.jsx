@@ -259,6 +259,7 @@ export default function IngestPage({ systemStatus = {} }) {
     docs: "/api/documents",
     status: (jobId) => `/api/status/${jobId}`,
     retry: (hash) => `/api/ingest/${hash}/retry`,
+    reprocessAll: "/api/ingest/reprocess_all",
     previewText: (hash, maxChars = null, parser = FALLBACK_PARSER) => {
       const params = new URLSearchParams({ parser });
       if (typeof maxChars === "number" && Number.isFinite(maxChars)) {
@@ -276,6 +277,7 @@ export default function IngestPage({ systemStatus = {} }) {
   const [uploadProgress, setUploadProgress] = useState([]);
   const [activeJobs, setActiveJobs] = useState(new Set());
   const [retryingHash, setRetryingHash] = useState(null);
+  const [reprocessingAll, setReprocessingAll] = useState(false);
   const [deletingHash, setDeletingHash] = useState(null);
   const [selectedDoc, setSelectedDoc] = useState(null);
   const [preview, setPreview] = useState("");
@@ -456,6 +458,29 @@ export default function IngestPage({ systemStatus = {} }) {
     catch (e) { setUploadStatus(`Retry failed: ${e.message || String(e)}`); }
     finally { setRetryingHash(null); }
   }, [api, refreshDocs]);
+
+  const handleReprocessAll = useCallback(async () => {
+    setReprocessingAll(true);
+    setUploadStatus("Reprocessing all documents...");
+    try {
+      const res = await fetch(api.reprocessAll, { method: "POST" });
+      const data = await readJsonSafe(res);
+      if (!res.ok) throw new Error((data && (data.detail || data.error || data.raw)) || res.statusText);
+      const processed = Number(data.processed ?? data.success ?? 0) || 0;
+      const failed = Number(data.failed ?? 0) || 0;
+      const skipped = Number(data.skipped ?? 0) || 0;
+      const summaryParts = [];
+      summaryParts.push(`Processed ${processed} document${processed === 1 ? "" : "s"}`);
+      if (skipped > 0) summaryParts.push(`Skipped ${skipped}`);
+      if (failed > 0) summaryParts.push(`${failed} failed`);
+      setUploadStatus(summaryParts.join(" • "));
+      void refreshDocs();
+    } catch (e) {
+      setUploadStatus(`Bulk reprocess failed: ${e.message || String(e)}`);
+    } finally {
+      setReprocessingAll(false);
+    }
+  }, [api.reprocessAll, refreshDocs]);
 
   const handleDeleteDoc = useCallback(async (doc) => {
     if (!doc?.hash) return;
@@ -840,6 +865,14 @@ export default function IngestPage({ systemStatus = {} }) {
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+              <button
+                onClick={handleReprocessAll}
+                disabled={reprocessingAll || displayDocs.length === 0}
+                style={{ ...styles.button, padding: "8px 18px", opacity: reprocessingAll || displayDocs.length === 0 ? 0.5 : 1 }}
+                title={displayDocs.length === 0 ? "No documents available" : "Re-chunk and re-embed every document"}
+              >
+                {reprocessingAll ? "Reprocessing…" : "Reprocess All"}
+              </button>
               <button
                 onClick={refreshDocs}
                 disabled={docsLoading}

@@ -45,6 +45,7 @@ class _QueuedBatchJob:
 _job_queue: "asyncio.Queue[_QueuedBatchJob]" = asyncio.Queue()
 _worker_task: Optional["asyncio.Task[None]"] = None
 _worker_lock = asyncio.Lock()
+_reprocess_all_lock = asyncio.Lock()
 
 
 async def ingest_file(file: UploadFile) -> Dict[str, Any]:
@@ -104,6 +105,173 @@ async def retry_ingest(doc_hash: str) -> Dict[str, Any]:
         "hash": doc_hash,
         "retry": True,
     }
+
+
+async def reprocess_after_ocr(doc_hash: str) -> Dict[str, Any]:
+    """Re-run chunking and embeddings using existing OCR text."""
+    doc = await document_store.get_document(doc_hash)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    active_jobs = [
+        jid
+        for jid, info in jobs_registry.items()
+        if info.get("status") in {"queued", "running"}
+        and any(d.get("hash") == doc_hash for d in info.get("docs", []))
+    ]
+    if active_jobs:
+        raise HTTPException(status_code=409, detail=f"Document is currently processing (jobs: {', '.join(active_jobs)})")
+
+    extraction = await document_store.get_extraction(doc_hash, settings.ocr_parser_key)
+    if not extraction:
+        raise HTTPException(status_code=404, detail="No OCR extraction found; re-run OCR first")
+
+    ocr_text = (extraction.get("text") or "").strip()
+    if not ocr_text:
+        raise HTTPException(status_code=400, detail="OCR extraction is empty; re-run OCR first")
+
+    await document_store.update_document_status(doc_hash, "processing")
+
+    chunk_specs = [
+        ChunkWindowSpec(
+            name="small",
+            core_size=settings.chunk_size,
+            left_padding=settings.chunk_overlap,
+            right_padding=settings.chunk_overlap,
+            step_size=settings.chunk_size,
+        ),
+        ChunkWindowSpec(
+            name="large",
+            core_size=settings.large_chunk_size,
+            left_padding=settings.large_chunk_left_overlap,
+            right_padding=settings.large_chunk_right_overlap,
+            step_size=settings.large_chunk_size,
+        ),
+    ]
+
+    try:
+        emb_client = EmbeddingClient()
+
+        start_chunking = time.perf_counter()
+        chunk_views = chunk_text_multi(ocr_text, chunk_specs)
+        small_chunks = chunk_views.get("small", [])
+        large_chunks = chunk_views.get("large", [])
+        if not small_chunks and not large_chunks:
+            raise RuntimeError("Chunking produced no chunks; check chunking settings")
+
+        small_chunk_rows = [(c.chunk_id, c.order_index, c.text, c.token_count) for c in small_chunks]
+        large_chunk_rows = [(c.chunk_id, c.order_index, c.text, c.token_count) for c in large_chunks]
+        await document_store.replace_chunks(doc_hash, settings.chunk_config_small_id, small_chunk_rows)
+        await document_store.replace_chunks(doc_hash, settings.chunk_config_large_id, large_chunk_rows)
+        chunking_time = time.perf_counter() - start_chunking
+
+        start_embedding = time.perf_counter()
+        rows = await _compute_embeddings_for_chunks(
+            [
+                {"chunk_id": cid, "order_index": idx, "text": txt, "token_count": tok}
+                for (cid, idx, txt, tok) in (small_chunk_rows + large_chunk_rows)
+            ],
+            emb_client,
+            doc_hash,
+        )
+        await document_store.replace_embeddings(rows)
+        embedding_time = time.perf_counter() - start_embedding
+
+        prev_metrics = await document_store.get_performance_metrics(doc_hash)
+        ocr_time_val = None
+        if prev_metrics:
+            try:
+                ocr_time_val = float(prev_metrics.get("ocr_time_sec")) if prev_metrics.get("ocr_time_sec") is not None else None
+            except (TypeError, ValueError):
+                ocr_time_val = prev_metrics.get("ocr_time_sec")
+        total_time = (ocr_time_val or 0.0) + chunking_time + embedding_time
+
+        await document_store.save_performance_metrics(
+            doc_hash,
+            ocr_time_sec=ocr_time_val,
+            chunking_time_sec=chunking_time,
+            embedding_time_sec=embedding_time,
+            total_time_sec=total_time,
+        )
+        await document_store.mark_document_processed(doc_hash)
+
+        return {
+            "hash": doc_hash,
+            "document_name": doc.get("original_name") or doc_hash,
+            "status": "processed",
+            "chunk_count": len(small_chunk_rows) + len(large_chunk_rows),
+            "small_chunks": len(small_chunk_rows),
+            "large_chunks": len(large_chunk_rows),
+            "total_embeddings": len(rows),
+            "chunking_time_sec": chunking_time,
+            "embedding_time_sec": embedding_time,
+            "ocr_time_sec": ocr_time_val,
+            "total_time_sec": total_time,
+        }
+    except HTTPException:
+        # Pass through HTTP-level errors unchanged
+        raise
+    except Exception as exc:
+        error_msg = str(exc)
+        await document_store.update_document_status(doc_hash, "error", error=error_msg)
+        raise HTTPException(status_code=500, detail=error_msg) from exc
+
+
+async def reprocess_all_documents() -> Dict[str, Any]:
+    """Reprocess every document that already completed OCR."""
+    if _reprocess_all_lock.locked():
+        raise HTTPException(status_code=409, detail="A bulk reprocess is already running")
+
+    async with _reprocess_all_lock:
+        docs = await document_store.list_documents()
+        doc_hashes = [doc.get("doc_hash") for doc in docs if doc.get("doc_hash")]
+        total = len(doc_hashes)
+        if total == 0:
+            return {"total": 0, "processed": 0, "skipped": 0, "failed": 0, "results": []}
+
+        results: List[Dict[str, Any]] = []
+        processed = 0
+        skipped = 0
+        failed = 0
+
+        for doc_hash in doc_hashes:
+            if not doc_hash:
+                skipped += 1
+                results.append({"hash": None, "status": "skipped", "reason": "missing_hash"})
+                continue
+            try:
+                payload = await reprocess_after_ocr(doc_hash)
+                processed += 1
+                results.append(
+                    {
+                        "hash": doc_hash,
+                        "status": "processed",
+                        "chunk_count": payload.get("chunk_count"),
+                        "total_embeddings": payload.get("total_embeddings"),
+                    }
+                )
+            except HTTPException as exc:
+                if isinstance(exc.detail, str):
+                    detail = exc.detail
+                else:
+                    detail = json.dumps(exc.detail) if isinstance(exc.detail, (dict, list)) else str(exc.detail)
+                if exc.status_code in (404, 409):
+                    skipped += 1
+                    results.append({"hash": doc_hash, "status": "skipped", "reason": detail})
+                else:
+                    failed += 1
+                    results.append({"hash": doc_hash, "status": "error", "reason": detail})
+            except Exception as exc:  # pragma: no cover - bulk guard
+                failed += 1
+                results.append({"hash": doc_hash, "status": "error", "reason": str(exc)})
+
+        return {
+            "total": total,
+            "processed": processed,
+            "failed": failed,
+            "skipped": skipped,
+            "results": results,
+        }
 
 
 def get_job_status(job_id: str) -> Dict[str, Any]:
