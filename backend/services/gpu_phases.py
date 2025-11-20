@@ -26,8 +26,8 @@ class GPUPhaseManager:
         self._state: str = "llm"
         self._last_error: Optional[str] = None
 
-    async def switch_to_ocr(self, reason: Optional[str] = None) -> None:
-        await self._transition(target="ocr", reason=reason)
+    async def switch_to_no_llm(self, reason: Optional[str] = None) -> None:
+        await self._transition(target="no_llm", reason=reason)
 
     async def switch_to_llm(self, reason: Optional[str] = None) -> None:
         await self._transition(target="llm", reason=reason)
@@ -44,7 +44,7 @@ class GPUPhaseManager:
         }
 
     async def _transition(self, target: str, reason: Optional[str]) -> None:
-        if target not in {"llm", "ocr"}:
+        if target not in {"llm", "no_llm"}:
             raise ValueError(f"Unknown GPU phase target: {target}")
         urls_missing = self._llm_url is None or self._ocr_url is None
         if urls_missing:
@@ -58,7 +58,7 @@ class GPUPhaseManager:
                 return
             logger.info("Switching GPU phase to %s (reason=%s)", target, reason)
             try:
-                if target == "ocr":
+                if target == "no_llm":
                     await self._call_control(self._llm_url, "unload")
                     await self._call_control(self._ocr_url, "load")
                 else:
@@ -72,7 +72,7 @@ class GPUPhaseManager:
 
     async def _refresh_current(self, target: str) -> None:
         try:
-            if target == "ocr" and self._ocr_url:
+            if target == "no_llm" and self._ocr_url:
                 await self._call_control(self._ocr_url, "status", method="GET", ignore_missing=True)
             elif target == "llm" and self._llm_url:
                 await self._call_control(self._llm_url, "status", method="GET", ignore_missing=True)

@@ -132,7 +132,7 @@ async def reprocess_after_ocr(doc_hash: str, *, ensure_gpu_phase: bool = True) -
 
     if ensure_gpu_phase:
         try:
-            await gpu_phase_manager.switch_to_ocr(reason=f"reprocess:{doc_hash}")
+            await gpu_phase_manager.switch_to_no_llm(reason=f"reprocess:{doc_hash}")
         except Exception as exc:
             raise HTTPException(status_code=503, detail=f"GPU not available for preprocessing: {exc}") from exc
 
@@ -236,7 +236,7 @@ async def reprocess_all_documents() -> Dict[str, Any]:
             return {"total": 0, "processed": 0, "skipped": 0, "failed": 0, "results": []}
 
         try:
-            await gpu_phase_manager.switch_to_ocr(reason="reprocess_all")
+            await gpu_phase_manager.switch_to_no_llm(reason="reprocess_all")
         except Exception as exc:
             raise HTTPException(status_code=503, detail=f"GPU not available for preprocessing: {exc}") from exc
 
@@ -487,7 +487,7 @@ async def _process_job(job_id: str, docs: Sequence[_QueuedBatchDoc]) -> None:
     ocr_phase_acquired = False
 
     try:
-        await gpu_phase_manager.switch_to_ocr(reason=f"ingest:{job_id}")
+        await gpu_phase_manager.switch_to_no_llm(reason=f"ingest:{job_id}")
         ocr_phase_acquired = True
     except Exception as exc:
         error_msg = f"GPU not available for OCR: {exc}"
