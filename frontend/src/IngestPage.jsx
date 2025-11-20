@@ -122,14 +122,20 @@ const styles = {
     overflow: "hidden",
   },
   card: { border: "none", borderRadius: 26, padding: "24px 26px", background: "linear-gradient(150deg, rgba(78, 89, 162, 0.98), rgba(26, 30, 64, 0.95))", boxShadow: "0 38px 76px rgba(5, 8, 25, 0.78)" },
-  sectionHeader: { display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, marginBottom: 12 },
-  sectionTitle: { margin: 0, fontSize: 18, fontWeight: 600, letterSpacing: 0.2 },
+  sectionHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 12
+  },
+  sectionTitle: { margin: 0, fontSize: 18, fontWeight: 600, letterSpacing: 0.2, whiteSpace: "nowrap" },
   badge: { padding: "4px 10px", borderRadius: 999, border: "1px solid rgba(148, 163, 184, 0.4)", fontSize: 12, color: "rgba(148, 163, 184, 0.85)", whiteSpace: "nowrap" },
   row: { display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" },
-  button: { font: "inherit", fontSize: 14, padding: "11px 24px", borderRadius: 999, border: "none", background: "linear-gradient(135deg, rgba(167, 139, 250, 0.94), rgba(59, 130, 246, 0.82))", color: "#f8f9ff", cursor: "pointer", boxShadow: "0 24px 44px rgba(5, 9, 25, 0.65)", transition: "transform 0.15s ease, box-shadow 0.15s ease" },
+  button: { font: "inherit", fontSize: 14, padding: "11px 24px", borderRadius: 999, border: "none", background: "linear-gradient(135deg, rgba(167, 139, 250, 0.94), rgba(59, 130, 246, 0.82))", color: "#f8f9ff", cursor: "pointer", boxShadow: "0 24px 44px rgba(5, 9, 25, 0.65)", transition: "transform 0.15s ease, box-shadow 0.15s ease", whiteSpace: "nowrap" },
   filePickerButton: { font: "inherit", fontSize: 14, padding: "11px 24px", borderRadius: 999, border: "none", background: "rgba(23, 28, 60, 0.98)", color: "rgba(248, 250, 255, 0.92)", cursor: "pointer", boxShadow: "0 0 0 2px rgba(59, 130, 246, 0.35), inset 0 2px 14px rgba(3, 6, 18, 0.7)", transition: "transform 0.15s ease, box-shadow 0.15s ease" },
   hiddenFileInput: { display: "none" },
-  subtleButton: { font: "inherit", fontSize: 13, padding: "8px 18px", borderRadius: 999, border: "none", background: "rgba(77, 88, 142, 0.96)", color: "rgba(248, 250, 255, 0.96)", cursor: "pointer", boxShadow: "0 18px 32px rgba(6, 9, 23, 0.62)", transition: "transform 0.15s ease, box-shadow 0.15s ease" },
+  subtleButton: { font: "inherit", fontSize: 13, padding: "8px 18px", borderRadius: 999, border: "none", background: "rgba(77, 88, 142, 0.96)", color: "rgba(248, 250, 255, 0.96)", cursor: "pointer", boxShadow: "0 18px 32px rgba(6, 9, 23, 0.62)", transition: "transform 0.15s ease, box-shadow 0.15s ease", whiteSpace: "nowrap" },
   input: { font: "inherit", padding: "12px 20px", borderRadius: 999, border: "none", background: "rgba(23, 28, 60, 0.98)", color: "inherit", minWidth: 0, boxShadow: "0 0 0 2px rgba(59, 130, 246, 0.26), inset 0 2px 14px rgba(3, 6, 18, 0.7)", outline: "none" },
   feedback: { marginTop: 10, fontSize: 13, color: "rgba(148, 163, 184, 0.85)" },
   docs: {
@@ -141,11 +147,11 @@ const styles = {
     maxHeight: "var(--ingest-library-scroll-max-height, calc(100vh - 180px))",
     border: "none",
     borderRadius: 18,
-    padding: 4,
+    padding: 10,
     background: "rgba(21, 26, 58, 0.97)",
     boxShadow: "0 24px 46px rgba(0, 0, 0, 0.6), inset 0 0 0 2px rgba(99, 102, 241, 0.11)",
   },
-  listItem: { padding: "12px 18px 12px", borderRadius: 20, background: "rgba(50, 63, 128, 0.96)", border: "none", marginBottom: 14, display: "flex", flexDirection: "column", gap: 4, boxShadow: "0 18px 32px rgba(4, 7, 20, 0.65)" },
+  listItem: { padding: "10px 16px", borderRadius: 20, background: "rgba(50, 63, 128, 0.96)", border: "none", marginBottom: 10, display: "flex", flexDirection: "column", gap: 4, boxShadow: "0 18px 32px rgba(4, 7, 20, 0.65)" },
   docTitleRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 },
   docTitleActions: { display: "flex", alignItems: "center", gap: 8, flexShrink: 0 },
   docName: { fontSize: 15, fontWeight: 600, color: "rgba(226, 232, 240, 0.95)", margin: 0, wordBreak: "break-word", lineHeight: 1.2 },
@@ -986,39 +992,39 @@ export default function IngestPage({ systemStatus = {} }) {
 
       <section style={{ ...styles.card, ...styles.libraryCard }}>
         <div style={styles.sectionHeader}>
-          <div>
-            <h3 style={styles.sectionTitle}>Document Library</h3>
+          <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <h3 style={styles.sectionTitle}>Document Library</h3>
+              {!canOpenChat && (
+                <span style={{ ...styles.muted, fontSize: 11 }}>{chatDisabledReason}</span>
+              )}
+            </div>
             <span style={styles.muted}>{`${systemStatus.docs_count || 0} ready / ${systemStatus.total_docs || displayDocs.length}`}</span>
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-              <button
-                onClick={handleReprocessAll}
-                disabled={reprocessingAll || displayDocs.length === 0}
-                style={{ ...styles.button, padding: "8px 18px", opacity: reprocessingAll || displayDocs.length === 0 ? 0.5 : 1 }}
-                title={displayDocs.length === 0 ? "No documents available" : "Re-chunk and re-embed every document"}
-              >
-                {reprocessingAll ? "Reprocessing…" : "Reprocess All"}
-              </button>
-              <button
-                onClick={refreshDocs}
-                disabled={docsLoading}
-                style={{ ...styles.subtleButton, opacity: docsLoading ? 0.6 : 1 }}
-              >
-                {docsLoading ? "Refreshing…" : "Refresh"}
-              </button>
-              <button
-                onClick={handleOpenChat}
-                disabled={!canOpenChat}
-                style={{ ...styles.button, padding: "6px 14px", opacity: canOpenChat ? 1 : 0.5 }}
-                title={canOpenChat ? "Jump to chat" : chatDisabledReason}
-              >
-                Open Chat
-              </button>
-            </div>
-            {!canOpenChat && (
-              <span style={{ ...styles.muted, fontSize: 11, textAlign: "right" }}>{chatDisabledReason}</span>
-            )}
+          <div style={{ display: "flex", gap: 8, flexWrap: "nowrap", justifyContent: "flex-end", alignItems: "center", minWidth: 0, flexShrink: 0 }}>
+            <button
+              onClick={handleReprocessAll}
+              disabled={reprocessingAll || displayDocs.length === 0}
+              style={{ ...styles.button, padding: "8px 18px", opacity: reprocessingAll || displayDocs.length === 0 ? 0.5 : 1 }}
+              title={displayDocs.length === 0 ? "No documents available" : "Re-chunk and re-embed every document"}
+            >
+              {reprocessingAll ? "Reprocessing…" : "Reprocess All"}
+            </button>
+            <button
+              onClick={refreshDocs}
+              disabled={docsLoading}
+              style={{ ...styles.subtleButton, opacity: docsLoading ? 0.6 : 1 }}
+            >
+              {docsLoading ? "Refreshing…" : "Refresh"}
+            </button>
+            <button
+              onClick={handleOpenChat}
+              disabled={!canOpenChat}
+              style={{ ...styles.button, padding: "6px 14px", opacity: canOpenChat ? 1 : 0.5 }}
+              title={canOpenChat ? "Jump to chat" : chatDisabledReason}
+            >
+              Open Chat
+            </button>
           </div>
         </div>
         <div style={{ ...styles.docs, ...(displayDocs.length ? {} : styles.muted) }}>
