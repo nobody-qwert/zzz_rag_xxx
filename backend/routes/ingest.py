@@ -6,6 +6,7 @@ from fastapi import APIRouter, File, UploadFile
 
 try:
     from ..services.ingestion import (
+        classify_document,
         get_job_status,
         ingest_files,
         reprocess_after_ocr,
@@ -14,6 +15,7 @@ try:
     )
 except ImportError:  # pragma: no cover
     from services.ingestion import (  # type: ignore
+        classify_document,
         get_job_status,
         ingest_files,
         reprocess_after_ocr,
@@ -55,3 +57,8 @@ async def reprocess_doc_route(doc_hash: str) -> Dict[str, Any]:
 @router.post("/ingest/reprocess_all")
 async def reprocess_all_route() -> Dict[str, Any]:
     return await reprocess_all_documents()
+
+
+@router.post("/ingest/{doc_hash}/classify")
+async def classify_doc_route(doc_hash: str) -> Dict[str, Any]:
+    return await classify_document(doc_hash)

@@ -283,6 +283,7 @@ export default function IngestPage({ systemStatus = {} }) {
     retry: (hash) => `/api/ingest/${hash}/retry`,
     preprocess: (hash) => `/api/ingest/${hash}/preprocess`,
     reprocessAll: "/api/ingest/reprocess_all",
+    classify: (hash) => `/api/ingest/${hash}/classify`,
     previewText: (hash, maxChars = null, parser = FALLBACK_PARSER) => {
       const params = new URLSearchParams({ parser });
       if (typeof maxChars === "number" && Number.isFinite(maxChars)) {
@@ -302,6 +303,7 @@ export default function IngestPage({ systemStatus = {} }) {
   const [retryingHash, setRetryingHash] = useState(null);
   const [reprocessingHash, setReprocessingHash] = useState(null);
   const [reprocessingAll, setReprocessingAll] = useState(false);
+  const [classifyingHash, setClassifyingHash] = useState(null);
   const [deletingHash, setDeletingHash] = useState(null);
   const [selectedDoc, setSelectedDoc] = useState(null);
   const [preview, setPreview] = useState("");
@@ -603,6 +605,24 @@ export default function IngestPage({ systemStatus = {} }) {
       setReprocessingAll(false);
     }
   }, [api.reprocessAll, refreshDocs]);
+
+  const handleReclassify = useCallback(async (hash) => {
+    if (!hash) return;
+    const short = shortHash(hash);
+    setClassifyingHash(hash);
+    setUploadStatus(`Reclassifying ${short}...`);
+    try {
+      const res = await fetch(api.classify(hash), { method: "POST" });
+      const data = await readJsonSafe(res);
+      if (!res.ok) throw new Error((data && (data.detail || data.error || data.raw)) || res.statusText);
+      setUploadStatus(`Classification queued for ${short}`);
+      await refreshDocs();
+    } catch (e) {
+      setUploadStatus(`Classification failed: ${e.message || String(e)}`);
+    } finally {
+      setClassifyingHash(null);
+    }
+  }, [api.classify, refreshDocs]);
 
   const handleDeleteDoc = useCallback(async (doc) => {
     if (!doc?.hash) return;
@@ -1082,6 +1102,34 @@ export default function IngestPage({ systemStatus = {} }) {
                 const showRetryOcr = showRetry && !ocrAvailable;
                 const showRetryPreprocess = showRetry && ocrAvailable && !embeddingsAvailable;
                 const showGeneralRetry = showRetry && !showRetryOcr && !showRetryPreprocess;
+                const classificationStatusRaw = d.classification_status || d.classificationStatus;
+                const classificationStatus = normalizeStatus(classificationStatusRaw);
+                const classificationInfo = d.classification || null;
+                const classificationError = d.classification_error || d.classificationError || "";
+                const classificationReady = classificationStatus === "classified" && classificationInfo;
+                const classificationInProgress = classificationStatus === "running" || classificationStatus === "queued";
+                const classificationLabel = classificationReady
+                  ? `${classificationInfo.l1_name || classificationInfo.l1_id || "Category"}${classificationInfo.l2_name ? ` → ${classificationInfo.l2_name}` : ""}`
+                  : classificationStatus === "error"
+                    ? "CLASSIFICATION ERROR"
+                    : classificationInProgress
+                      ? "CLASSIFYING"
+                      : "CLASSIFICATION PENDING";
+                const classificationBadgeStyle = classificationStatus === "classified"
+                  ? styles.docStageReady
+                  : classificationStatus === "error"
+                    ? styles.docStageError
+                    : styles.docStagePending;
+                const classificationTooltip = classificationReady
+                  ? [
+                      classificationInfo.l1_name || classificationInfo.l1_id,
+                      classificationInfo.l2_name ? `→ ${classificationInfo.l2_name}` : "",
+                      classificationInfo.l1_confidence ? `L1 confidence: ${classificationInfo.l1_confidence}` : "",
+                      classificationInfo.l2_confidence ? `L2 confidence: ${classificationInfo.l2_confidence}` : "",
+                    ].filter(Boolean).join("\n") || undefined
+                  : (classificationError || undefined);
+                const canReclassify = Boolean(d.hash && isCompleted);
+                const reclassifyDisabled = classificationInProgress || classifyingHash === d.hash;
                 
                 return (
                   <li key={d.hash || d.stored_name || d.name} style={styles.listItem}>
@@ -1142,7 +1190,23 @@ export default function IngestPage({ systemStatus = {} }) {
                       >
                         {embedBadgeLabel}
                       </span>
+                      <span
+                        style={{ ...styles.docStageBadge, ...classificationBadgeStyle }}
+                        title={classificationTooltip}
+                      >
+                        {classificationLabel}
+                      </span>
                     </div>
+                    {classificationReady && (
+                      <div style={{ ...styles.docMetaRow, marginTop: 4 }}>
+                        <span style={styles.docMetaItem}>
+                          <span style={{ opacity: 0.65 }}>Classification:</span>{" "}
+                          {classificationInfo.l1_name || classificationInfo.l1_id}
+                          {classificationInfo.l2_name ? ` → ${classificationInfo.l2_name}` : ""}
+                          {classificationInfo.l2_id && !classificationInfo.l2_name ? ` → ${classificationInfo.l2_id}` : ""}
+                        </span>
+                      </div>
+                    )}
 
                     {(d.last_ingested_at || showPerf) && (
                       <>
@@ -1211,6 +1275,21 @@ export default function IngestPage({ systemStatus = {} }) {
                       </div>
                     )}
                     {d.error && (<div style={styles.error}>Error: {d.error}</div>)}
+                    {classificationError && classificationStatus === "error" && (
+                      <div style={styles.error}>Classification error: {classificationError}</div>
+                    )}
+                    {canReclassify && (
+                      <div style={{ ...styles.docActions, justifyContent: "flex-start" }}>
+                        <button
+                          style={{ ...styles.subtleButton, opacity: reclassifyDisabled ? 0.6 : 1 }}
+                          onClick={() => handleReclassify(d.hash)}
+                          disabled={reclassifyDisabled}
+                          title="Re-run LLM document classification"
+                        >
+                          {reclassifyDisabled ? "Classifying…" : "Re-classify"}
+                        </button>
+                      </div>
+                    )}
 
                     {showRetry && (
                       <div style={styles.docActions}>

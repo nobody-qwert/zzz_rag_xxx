@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .api import (
+    classify_document,
     delete_document,
     get_job_status,
     ingest_file,
@@ -19,4 +20,5 @@ __all__ = [
     "get_job_status",
     "delete_document",
     "warmup_mineru",
+    "classify_document",
 ]

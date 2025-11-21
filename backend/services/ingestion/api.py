@@ -9,7 +9,7 @@ from .context import document_store, jobs_registry, settings
 from .models import QueuedBatchDoc
 from .ocr import warmup_mineru as warmup_mineru_call
 from .uploads import prepare_upload
-from .worker import queue_batch_job
+from .worker import queue_batch_job, queue_classification_job
 
 
 async def ingest_file(file: UploadFile) -> Dict[str, Any]:
@@ -115,6 +115,28 @@ async def delete_document(doc_hash: str) -> Dict[str, Any]:
         "deleted": bool(deleted),
         "file_removed": file_removed,
         "removed_jobs": removed_jobs,
+    }
+
+
+async def classify_document(doc_hash: str) -> Dict[str, Any]:
+    doc = await document_store.get_document(doc_hash)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    status = str(doc.get("status") or "").strip().lower()
+    if status not in settings.completed_doc_statuses:
+        raise HTTPException(status_code=400, detail="Document must be processed before classification")
+    extraction = await document_store.get_extraction(doc_hash, settings.ocr_parser_key)
+    if not extraction or not (extraction.get("text") or "").strip():
+        raise HTTPException(status_code=400, detail="No OCR extraction available for classification")
+
+    await document_store.update_classification_status(doc_hash, "queued", error=None)
+    job_id = await queue_classification_job([doc_hash])
+    return {
+        "job_id": job_id,
+        "status": "queued",
+        "hash": doc_hash,
+        "file": doc.get("original_name") or doc_hash,
+        "phase": "classification",
     }
 
 
