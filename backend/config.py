@@ -54,6 +54,7 @@ class AppSettings:
     llm_control_url: Optional[str]
     ocr_control_url: Optional[str]
     gpu_phase_timeout: float
+    llm_ready_timeout: float
     diagnostics_url: Optional[str]
 
 
@@ -166,6 +167,7 @@ def load_settings() -> AppSettings:
         llm_control_url=llm_control_url.strip() or None,
         ocr_control_url=ocr_control_url.strip() or None,
         gpu_phase_timeout=_float_env("GPU_PHASE_TIMEOUT", "60"),
+        llm_ready_timeout=_float_env("LLM_READY_TIMEOUT", "180"),
         diagnostics_url=diagnostics_url or None,
     )
 

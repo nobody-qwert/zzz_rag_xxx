@@ -20,7 +20,9 @@ jobs_registry: Dict[str, Dict[str, Any]] = {}
 gpu_phase_manager = GPUPhaseManager(
     settings.llm_control_url,
     settings.ocr_control_url,
+    llm_inference_url=settings.llm_base_url,
     timeout=settings.gpu_phase_timeout,
+    ready_check_timeout=settings.llm_ready_timeout,
 )
 
 

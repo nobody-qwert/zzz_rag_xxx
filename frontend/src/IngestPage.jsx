@@ -199,19 +199,17 @@ const styles = {
     boxShadow: "0 22px 38px rgba(0, 0, 0, 0.5), inset 0 0 0 2px rgba(99, 102, 241, 0.14)",
   },
   previewMetaSections: { display: "flex", flexDirection: "column", gap: 12 },
-  previewStatsGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 },
-  previewStatCard: {
-    borderRadius: 18,
-    padding: "12px 14px",
-    background: "rgba(56, 69, 132, 0.9)",
-    boxShadow: "0 16px 26px rgba(5, 8, 25, 0.55)",
+  previewStatsLine: {
     display: "flex",
-    flexDirection: "column",
-    gap: 2,
-    minHeight: 0,
+    flexWrap: "wrap",
+    gap: 12,
+    marginBottom: 4,
+    fontSize: 12,
+    lineHeight: 1.3,
+    color: "rgba(226, 232, 240, 0.9)",
   },
-  previewStatValue: { fontSize: 16, fontWeight: 600, color: "#e0e7ff", lineHeight: 1.2 },
-  previewStatLabel: { fontSize: 11, letterSpacing: 0.4, color: "rgba(148, 163, 184, 0.9)", textTransform: "uppercase" },
+  previewStatsItem: { whiteSpace: "nowrap" },
+  previewStatsLabel: { opacity: 0.65, marginRight: 4 },
   previewMetaLayout: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 },
   previewMetaBlock: {
     borderRadius: 20,
@@ -1017,37 +1015,29 @@ export default function IngestPage({ systemStatus = {} }) {
                 
                 <div style={styles.previewMetaSections}>
                   {previewInfo && (
-                    <div style={styles.previewStatsGrid}>
-                      {[
-                        {
-                          label: "File Size",
-                          value: prettyBytes(previewInfo.file_size),
-                        },
-                        {
-                          label: "Characters",
-                          value: (previewInfo.extracted_chars || 0).toLocaleString(),
-                        },
-                        {
-                          label: "Tokens",
-                          value: Number(previewInfo.total_tokens || 0).toLocaleString(),
-                        },
-                        {
-                          label: "Embeddings",
-                          value: Number(previewInfo.total_embeddings || previewInfo.chunk_count || 0).toLocaleString(),
-                          detail: `Small ${Number(previewInfo.small_embeddings || 0).toLocaleString()} · Large ${Number(previewInfo.large_embeddings || 0).toLocaleString()}`,
-                        },
-                        {
-                          label: "Previewed",
-                          value: Number(previewInfo.preview_chars || 0).toLocaleString(),
-                          detail: previewInfo.truncated ? "Limited for quick preview" : "Full document",
-                        },
-                      ].map((stat) => (
-                        <div key={stat.label} style={styles.previewStatCard}>
-                          <div style={styles.previewStatValue}>{stat.value}</div>
-                          <div style={styles.previewStatLabel}>{stat.label}</div>
-                          {stat.detail && <div style={styles.previewMetaFooter}>{stat.detail}</div>}
-                        </div>
-                      ))}
+                    <div style={styles.previewStatsLine}>
+                      <span style={styles.previewStatsItem}>
+                        <span style={styles.previewStatsLabel}>Size:</span>
+                        {prettyBytes(previewInfo.file_size)}
+                      </span>
+                      <span style={styles.previewStatsItem}>
+                        <span style={styles.previewStatsLabel}>Characters:</span>
+                        {(previewInfo.extracted_chars || 0).toLocaleString()}
+                      </span>
+                      <span style={styles.previewStatsItem}>
+                        <span style={styles.previewStatsLabel}>Tokens:</span>
+                        {Number(previewInfo.total_tokens || 0).toLocaleString()}
+                      </span>
+                      <span style={styles.previewStatsItem}>
+                        <span style={styles.previewStatsLabel}>Embeddings:</span>
+                        {Number(previewInfo.total_embeddings || previewInfo.chunk_count || 0).toLocaleString()}
+                        {` (Small ${Number(previewInfo.small_embeddings || 0).toLocaleString()} • Large ${Number(previewInfo.large_embeddings || 0).toLocaleString()})`}
+                      </span>
+                      <span style={styles.previewStatsItem}>
+                        <span style={styles.previewStatsLabel}>Previewed:</span>
+                        {Number(previewInfo.preview_chars || 0).toLocaleString()}
+                        {previewInfo.truncated ? " (limited preview)" : " (full document)"}
+                      </span>
                     </div>
                   )}
                   <div style={styles.previewMetaLayout}>
