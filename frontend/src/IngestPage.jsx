@@ -210,6 +210,7 @@ const styles = {
   },
   previewStatsItem: { whiteSpace: "nowrap" },
   previewStatsLabel: { opacity: 0.65, marginRight: 4 },
+  previewStatsClassification: { display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap", color: "rgba(226, 232, 240, 0.95)" },
   previewMetaLayout: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 },
   previewMetaBlock: {
     borderRadius: 20,
@@ -225,20 +226,6 @@ const styles = {
   previewMetaBody: { fontSize: 13, color: "#e2e8f0", lineHeight: 1.45 },
   previewMetaFooter: { fontSize: 12, color: "rgba(148, 163, 184, 0.85)" },
   previewSummaryPlaceholder: { fontStyle: "italic", color: "rgba(148, 163, 184, 0.85)" },
-  previewClassificationBadge: {
-    alignSelf: "flex-start",
-    fontSize: 11,
-    letterSpacing: 0.6,
-    textTransform: "uppercase",
-    padding: "4px 12px",
-    borderRadius: 999,
-    border: "1px solid rgba(148, 163, 184, 0.35)",
-    color: "rgba(226, 232, 240, 0.95)",
-    background: "rgba(59, 130, 246, 0.18)",
-  },
-  previewClassificationBadgeReady: { background: "rgba(34, 197, 94, 0.18)", borderColor: "rgba(34, 197, 94, 0.45)", color: "rgba(209, 250, 229, 0.95)" },
-  previewClassificationBadgePending: { background: "rgba(79, 70, 229, 0.16)", borderColor: "rgba(99, 102, 241, 0.35)" },
-  previewClassificationBadgeError: { background: "rgba(248, 113, 113, 0.2)", borderColor: "rgba(248, 113, 113, 0.5)", color: "rgba(254, 226, 226, 0.96)" },
   previewEmpty: {
     flex: 1,
     display: "flex",
@@ -504,38 +491,31 @@ export default function IngestPage({ systemStatus = {} }) {
   const classificationReady = Boolean(classificationInfo) && classificationStatus === "classified";
   const classificationInProgress = classificationStatus === "running" || classificationStatus === "queued";
   const classificationErrorMessage = selectedDoc?.classification_error || selectedDoc?.classificationError || "";
-  const classificationStatusLabel = classificationStatus ? formatStatusLabel(classificationStatus) : "CLASSIFICATION";
-  let classificationPrimaryText = "Classification pending.";
-  const classificationDetailLines = [];
-  if (classificationReady) {
-    const targetParts = [classificationInfo.l1_name || classificationInfo.l1_id || "Category"];
-    if (classificationInfo.l2_name) targetParts.push(`→ ${classificationInfo.l2_name}`);
-    else if (classificationInfo.l2_id && !classificationInfo.l2_name) targetParts.push(`→ ${classificationInfo.l2_id}`);
-    classificationPrimaryText = targetParts.join(" ");
-    const confidenceParts = [];
-    if (classificationInfo.l1_confidence) confidenceParts.push(`L1 confidence ${classificationInfo.l1_confidence}`);
-    if (classificationInfo.l2_confidence) confidenceParts.push(`L2 confidence ${classificationInfo.l2_confidence}`);
-    if (confidenceParts.length) classificationDetailLines.push(confidenceParts.join(" • "));
-  } else if (classificationStatus === "error") {
-    classificationPrimaryText = "Classification failed.";
-    if (classificationErrorMessage) classificationDetailLines.push(classificationErrorMessage);
-  } else if (classificationInProgress) {
-    classificationPrimaryText = "Classification running…";
-    classificationDetailLines.push("Hang tight—this will update once the model finishes.");
-  } else if (selectedDoc) {
-    classificationDetailLines.push("Trigger classification from the document library to populate this section.");
+  const hasSelectedDoc = Boolean(selectedDoc);
+  let classificationPrimaryText = hasSelectedDoc ? "Classification pending." : "";
+  let classificationSupplementalText = "";
+  if (hasSelectedDoc) {
+    if (classificationReady) {
+      const targetParts = [classificationInfo.l1_name || classificationInfo.l1_id || "Category"];
+      if (classificationInfo.l2_name) targetParts.push(`→ ${classificationInfo.l2_name}`);
+      else if (classificationInfo.l2_id && !classificationInfo.l2_name) targetParts.push(`→ ${classificationInfo.l2_id}`);
+      classificationPrimaryText = targetParts.join(" ");
+    } else if (classificationStatus === "error") {
+      classificationPrimaryText = "Classification failed.";
+      classificationSupplementalText = classificationErrorMessage || "";
+    } else if (classificationInProgress) {
+      classificationPrimaryText = "Classification running…";
+      classificationSupplementalText = "Hang tight—this will update once the model finishes.";
+    } else {
+      classificationPrimaryText = "Classification pending.";
+      classificationSupplementalText = "Trigger classification from the document library to populate this section.";
+    }
   }
-  if (selectedDoc?.last_classified_at) {
-    classificationDetailLines.push(`Last updated ${formatDate(selectedDoc.last_classified_at)}`);
-  }
-  const classificationBadgeStyle = {
-    ...styles.previewClassificationBadge,
-    ...(classificationReady
-      ? styles.previewClassificationBadgeReady
-      : classificationStatus === "error"
-        ? styles.previewClassificationBadgeError
-        : styles.previewClassificationBadgePending),
-  };
+  const classificationInlineText = hasSelectedDoc
+    ? (classificationSupplementalText
+        ? `${classificationPrimaryText} (${classificationSupplementalText})`
+        : classificationPrimaryText)
+    : "";
   const summaryRaw = typeof selectedDoc?.summary === "string" ? selectedDoc.summary.trim() : "";
   const summaryDisplayText = summaryRaw || "Summary will be shown here.";
 
@@ -1033,24 +1013,17 @@ export default function IngestPage({ systemStatus = {} }) {
                         {Number(previewInfo.total_embeddings || previewInfo.chunk_count || 0).toLocaleString()}
                         {` (Small ${Number(previewInfo.small_embeddings || 0).toLocaleString()} • Large ${Number(previewInfo.large_embeddings || 0).toLocaleString()})`}
                       </span>
-                      <span style={styles.previewStatsItem}>
-                        <span style={styles.previewStatsLabel}>Previewed:</span>
-                        {Number(previewInfo.preview_chars || 0).toLocaleString()}
-                        {previewInfo.truncated ? " (limited preview)" : " (full document)"}
-                      </span>
+                      {hasSelectedDoc && (
+                        <span style={{ ...styles.previewStatsItem, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                          <span style={styles.previewStatsLabel}>Classification:</span>
+                          <span style={styles.previewStatsClassification}>
+                            {classificationInlineText}
+                          </span>
+                        </span>
+                      )}
                     </div>
                   )}
                   <div style={styles.previewMetaLayout}>
-                    <div style={styles.previewMetaBlock}>
-                      <span style={styles.previewMetaTitle}>Document Classification</span>
-                      <span style={classificationBadgeStyle}>{classificationStatusLabel}</span>
-                      <div style={styles.previewMetaBody}>{classificationPrimaryText}</div>
-                      {classificationDetailLines.map((line, idx) => (
-                        <div key={`classification-detail-${idx}`} style={styles.previewMetaFooter}>
-                          {line}
-                        </div>
-                      ))}
-                    </div>
                     <div style={styles.previewMetaBlock}>
                       <span style={styles.previewMetaTitle}>Summary</span>
                       <div
