@@ -198,6 +198,49 @@ const styles = {
     overflow: "auto",
     boxShadow: "0 22px 38px rgba(0, 0, 0, 0.5), inset 0 0 0 2px rgba(99, 102, 241, 0.14)",
   },
+  previewMetaSections: { display: "flex", flexDirection: "column", gap: 12 },
+  previewStatsGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 },
+  previewStatCard: {
+    borderRadius: 18,
+    padding: "12px 14px",
+    background: "rgba(56, 69, 132, 0.9)",
+    boxShadow: "0 16px 26px rgba(5, 8, 25, 0.55)",
+    display: "flex",
+    flexDirection: "column",
+    gap: 2,
+    minHeight: 0,
+  },
+  previewStatValue: { fontSize: 16, fontWeight: 600, color: "#e0e7ff", lineHeight: 1.2 },
+  previewStatLabel: { fontSize: 11, letterSpacing: 0.4, color: "rgba(148, 163, 184, 0.9)", textTransform: "uppercase" },
+  previewMetaLayout: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 },
+  previewMetaBlock: {
+    borderRadius: 20,
+    padding: "16px 18px",
+    background: "rgba(25, 33, 74, 0.92)",
+    boxShadow: "0 22px 34px rgba(4, 7, 21, 0.6)",
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+    minHeight: 0,
+  },
+  previewMetaTitle: { fontSize: 12, letterSpacing: 0.5, textTransform: "uppercase", color: "rgba(148, 163, 184, 0.9)" },
+  previewMetaBody: { fontSize: 13, color: "#e2e8f0", lineHeight: 1.45 },
+  previewMetaFooter: { fontSize: 12, color: "rgba(148, 163, 184, 0.85)" },
+  previewSummaryPlaceholder: { fontStyle: "italic", color: "rgba(148, 163, 184, 0.85)" },
+  previewClassificationBadge: {
+    alignSelf: "flex-start",
+    fontSize: 11,
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
+    padding: "4px 12px",
+    borderRadius: 999,
+    border: "1px solid rgba(148, 163, 184, 0.35)",
+    color: "rgba(226, 232, 240, 0.95)",
+    background: "rgba(59, 130, 246, 0.18)",
+  },
+  previewClassificationBadgeReady: { background: "rgba(34, 197, 94, 0.18)", borderColor: "rgba(34, 197, 94, 0.45)", color: "rgba(209, 250, 229, 0.95)" },
+  previewClassificationBadgePending: { background: "rgba(79, 70, 229, 0.16)", borderColor: "rgba(99, 102, 241, 0.35)" },
+  previewClassificationBadgeError: { background: "rgba(248, 113, 113, 0.2)", borderColor: "rgba(248, 113, 113, 0.5)", color: "rgba(254, 226, 226, 0.96)" },
   previewEmpty: {
     flex: 1,
     display: "flex",
@@ -357,6 +400,13 @@ export default function IngestPage({ systemStatus = {} }) {
 
   const { data: gpuStats, error: gpuError, loading: gpuLoading } = useGpuDiagnostics(diagnosticsOpen);
   const displayDocs = docs.length ? docs : systemDocs;
+  useEffect(() => {
+    if (!selectedDoc?.hash) return;
+    const updated = displayDocs.find((doc) => doc && doc.hash === selectedDoc.hash);
+    if (updated && updated !== selectedDoc) {
+      setSelectedDoc(updated);
+    }
+  }, [displayDocs, selectedDoc]);
   const jobInfoByHash = useMemo(() => {
     const map = new Map();
     if (Array.isArray(systemStatus.jobs)) {
@@ -449,6 +499,47 @@ export default function IngestPage({ systemStatus = {} }) {
 
     return results;
   }, [jobQueueEntries, uploadProgress, documentQueueEntries]);
+
+  const classificationInfo = selectedDoc?.classification || null;
+  const classificationStatusRaw = selectedDoc?.classification_status || selectedDoc?.classificationStatus || "";
+  const classificationStatus = normalizeStatus(classificationStatusRaw);
+  const classificationReady = Boolean(classificationInfo) && classificationStatus === "classified";
+  const classificationInProgress = classificationStatus === "running" || classificationStatus === "queued";
+  const classificationErrorMessage = selectedDoc?.classification_error || selectedDoc?.classificationError || "";
+  const classificationStatusLabel = classificationStatus ? formatStatusLabel(classificationStatus) : "CLASSIFICATION";
+  let classificationPrimaryText = "Classification pending.";
+  const classificationDetailLines = [];
+  if (classificationReady) {
+    const targetParts = [classificationInfo.l1_name || classificationInfo.l1_id || "Category"];
+    if (classificationInfo.l2_name) targetParts.push(`→ ${classificationInfo.l2_name}`);
+    else if (classificationInfo.l2_id && !classificationInfo.l2_name) targetParts.push(`→ ${classificationInfo.l2_id}`);
+    classificationPrimaryText = targetParts.join(" ");
+    const confidenceParts = [];
+    if (classificationInfo.l1_confidence) confidenceParts.push(`L1 confidence ${classificationInfo.l1_confidence}`);
+    if (classificationInfo.l2_confidence) confidenceParts.push(`L2 confidence ${classificationInfo.l2_confidence}`);
+    if (confidenceParts.length) classificationDetailLines.push(confidenceParts.join(" • "));
+  } else if (classificationStatus === "error") {
+    classificationPrimaryText = "Classification failed.";
+    if (classificationErrorMessage) classificationDetailLines.push(classificationErrorMessage);
+  } else if (classificationInProgress) {
+    classificationPrimaryText = "Classification running…";
+    classificationDetailLines.push("Hang tight—this will update once the model finishes.");
+  } else if (selectedDoc) {
+    classificationDetailLines.push("Trigger classification from the document library to populate this section.");
+  }
+  if (selectedDoc?.last_classified_at) {
+    classificationDetailLines.push(`Last updated ${formatDate(selectedDoc.last_classified_at)}`);
+  }
+  const classificationBadgeStyle = {
+    ...styles.previewClassificationBadge,
+    ...(classificationReady
+      ? styles.previewClassificationBadgeReady
+      : classificationStatus === "error"
+        ? styles.previewClassificationBadgeError
+        : styles.previewClassificationBadgePending),
+  };
+  const summaryRaw = typeof selectedDoc?.summary === "string" ? selectedDoc.summary.trim() : "";
+  const summaryDisplayText = summaryRaw || "Summary will be shown here.";
 
   const handleUploadAll = async () => {
     if (files.length === 0) { setUploadStatus("Select files first."); return; }
@@ -924,32 +1015,70 @@ export default function IngestPage({ systemStatus = {} }) {
                   <span style={styles.badge}>{parser}</span>
                 </div>
                 
-                {/* Statistics Grid */}
-                {previewInfo && (
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))", gap: 10, marginBottom: 10 }}>
-                    <div style={{ textAlign: "center", padding: "14px 16px", background: "rgba(147, 197, 253, 0.35)", borderRadius: 20, border: "none", boxShadow: "0 18px 34px rgba(3, 6, 20, 0.5)" }}>
-                      <div style={{ fontSize: 16, fontWeight: 600, color: "#c7d7ff" }}>{prettyBytes(previewInfo.file_size)}</div>
-                      <div style={{ fontSize: 11, color: "rgba(148, 163, 184, 0.85)", marginTop: 2 }}>File Size</div>
+                <div style={styles.previewMetaSections}>
+                  {previewInfo && (
+                    <div style={styles.previewStatsGrid}>
+                      {[
+                        {
+                          label: "File Size",
+                          value: prettyBytes(previewInfo.file_size),
+                        },
+                        {
+                          label: "Characters",
+                          value: (previewInfo.extracted_chars || 0).toLocaleString(),
+                        },
+                        {
+                          label: "Tokens",
+                          value: Number(previewInfo.total_tokens || 0).toLocaleString(),
+                        },
+                        {
+                          label: "Embeddings",
+                          value: Number(previewInfo.total_embeddings || previewInfo.chunk_count || 0).toLocaleString(),
+                          detail: `Small ${Number(previewInfo.small_embeddings || 0).toLocaleString()} · Large ${Number(previewInfo.large_embeddings || 0).toLocaleString()}`,
+                        },
+                        {
+                          label: "Previewed",
+                          value: Number(previewInfo.preview_chars || 0).toLocaleString(),
+                          detail: previewInfo.truncated ? "Limited for quick preview" : "Full document",
+                        },
+                      ].map((stat) => (
+                        <div key={stat.label} style={styles.previewStatCard}>
+                          <div style={styles.previewStatValue}>{stat.value}</div>
+                          <div style={styles.previewStatLabel}>{stat.label}</div>
+                          {stat.detail && <div style={styles.previewMetaFooter}>{stat.detail}</div>}
+                        </div>
+                      ))}
                     </div>
-                    <div style={{ textAlign: "center", padding: "14px 16px", background: "rgba(147, 197, 253, 0.35)", borderRadius: 20, border: "none", boxShadow: "0 18px 34px rgba(3, 6, 20, 0.5)" }}>
-                      <div style={{ fontSize: 16, fontWeight: 600, color: "#c7d7ff" }}>{(previewInfo.extracted_chars || 0).toLocaleString()}</div>
-                      <div style={{ fontSize: 11, color: "rgba(148, 163, 184, 0.85)", marginTop: 2 }}>Characters</div>
+                  )}
+                  <div style={styles.previewMetaLayout}>
+                    <div style={styles.previewMetaBlock}>
+                      <span style={styles.previewMetaTitle}>Document Classification</span>
+                      <span style={classificationBadgeStyle}>{classificationStatusLabel}</span>
+                      <div style={styles.previewMetaBody}>{classificationPrimaryText}</div>
+                      {classificationDetailLines.map((line, idx) => (
+                        <div key={`classification-detail-${idx}`} style={styles.previewMetaFooter}>
+                          {line}
+                        </div>
+                      ))}
                     </div>
-                    <div style={{ textAlign: "center", padding: "14px 16px", background: "rgba(147, 197, 253, 0.35)", borderRadius: 20, border: "none", boxShadow: "0 18px 34px rgba(3, 6, 20, 0.5)" }}>
-                      <div style={{ fontSize: 16, fontWeight: 600, color: "#c7d7ff" }}>{Number(previewInfo.total_tokens || 0).toLocaleString()}</div>
-                      <div style={{ fontSize: 11, color: "rgba(148, 163, 184, 0.85)", marginTop: 2 }}>Tokens</div>
-                    </div>
-                    <div style={{ textAlign: "center", padding: "14px 16px", background: "rgba(147, 197, 253, 0.35)", borderRadius: 20, border: "none", boxShadow: "0 18px 34px rgba(3, 6, 20, 0.5)" }}>
-                      <div style={{ fontSize: 16, fontWeight: 600, color: "#c7d7ff" }}>{Number(previewInfo.small_embeddings || 0).toLocaleString()}</div>
-                      <div style={{ fontSize: 11, color: "rgba(148, 163, 184, 0.85)", marginTop: 2 }}>Small Embeddings</div>
-                    </div>
-                    <div style={{ textAlign: "center", padding: "14px 16px", background: "rgba(147, 197, 253, 0.35)", borderRadius: 20, border: "none", boxShadow: "0 18px 34px rgba(3, 6, 20, 0.5)" }}>
-                      <div style={{ fontSize: 16, fontWeight: 600, color: "#c7d7ff" }}>{Number(previewInfo.large_embeddings || 0).toLocaleString()}</div>
-                      <div style={{ fontSize: 11, color: "rgba(148, 163, 184, 0.85)", marginTop: 2 }}>Large Embeddings</div>
+                    <div style={styles.previewMetaBlock}>
+                      <span style={styles.previewMetaTitle}>Summary</span>
+                      <div
+                        style={{
+                          ...styles.previewMetaBody,
+                          ...(summaryRaw ? {} : styles.previewSummaryPlaceholder),
+                        }}
+                      >
+                        {summaryDisplayText}
+                      </div>
+                      {!summaryRaw && (
+                        <div style={styles.previewMetaFooter}>
+                          Summaries will appear once the summarization step is enabled for this document.
+                        </div>
+                      )}
                     </div>
                   </div>
-                )}
-                
+                </div>
               </div>
               
               {/* Text Preview Section */}
