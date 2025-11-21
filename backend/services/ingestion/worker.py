@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 import time
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Set
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -17,17 +17,24 @@ except ImportError:  # pragma: no cover
 from .context import document_store, gpu_phase_manager, jobs_registry, settings
 from .models import QueuedBatchDoc, QueuedBatchJob
 from .ocr import call_ocr_module
-from .pipeline import build_chunk_specs, run_postprocess_pipeline
+from .pipeline import build_chunk_specs
+from .postprocess_runner import run_postprocess_for_doc
 
 logger = logging.getLogger(__name__)
 
 _job_queue: "asyncio.Queue[QueuedBatchJob]" = asyncio.Queue()
 _worker_task: Optional["asyncio.Task[None]"] = None
 _worker_lock = asyncio.Lock()
+DEFAULT_PHASES: List[str] = ["ocr", "postprocess"]
 
 
-async def queue_batch_job(docs: Sequence[QueuedBatchDoc]) -> str:
-    batch_docs = [doc for doc in docs if doc.doc_path.exists()]
+async def queue_batch_job(docs: Sequence[QueuedBatchDoc], *, phases: Optional[Sequence[str]] = None) -> str:
+    phase_order = _normalize_phases(phases)
+    if not phase_order:
+        raise HTTPException(status_code=400, detail="No phases requested")
+
+    requires_file = "ocr" in phase_order
+    batch_docs = [doc for doc in docs if (doc.doc_path.exists() or not requires_file)]
     if not batch_docs:
         raise HTTPException(status_code=400, detail="No documents to ingest")
 
@@ -37,10 +44,34 @@ async def queue_batch_job(docs: Sequence[QueuedBatchDoc]) -> str:
         doc.job_record_id = job_record_id
         await document_store.create_job(job_record_id, doc.doc_hash)
 
-    _init_job_entry(job_id, batch_docs)
-    await _job_queue.put(QueuedBatchJob(job_id=job_id, docs=list(batch_docs)))
+    _init_job_entry(job_id, batch_docs, phases=phase_order)
+    await _job_queue.put(QueuedBatchJob(job_id=job_id, docs=list(batch_docs), phases=phase_order))
     await ensure_worker_running()
     return job_id
+
+
+async def queue_ocr_only_job(docs: Sequence[QueuedBatchDoc]) -> str:
+    return await queue_batch_job(docs, phases=["ocr"])
+
+
+async def queue_postprocess_job(doc_hashes: Sequence[str]) -> str:
+    if not doc_hashes:
+        raise HTTPException(status_code=400, detail="No documents to postprocess")
+    prepared_docs: List[QueuedBatchDoc] = []
+    for doc_hash in doc_hashes:
+        doc = await document_store.get_document(doc_hash)
+        if not doc:
+            raise HTTPException(status_code=404, detail=f"Document {doc_hash} not found")
+        stored_name = doc.get("stored_name") or doc_hash
+        display_name = doc.get("original_name") or stored_name
+        prepared_docs.append(
+            QueuedBatchDoc(
+                doc_path=settings.data_dir / stored_name,
+                doc_hash=doc_hash,
+                display_name=display_name,
+            )
+        )
+    return await queue_batch_job(prepared_docs, phases=["postprocess"])
 
 
 async def ensure_worker_running() -> None:
@@ -50,7 +81,19 @@ async def ensure_worker_running() -> None:
             _worker_task = asyncio.create_task(_job_worker())
 
 
-def _init_job_entry(job_id: str, docs: Sequence[QueuedBatchDoc]) -> None:
+def _normalize_phases(phases: Optional[Sequence[str]]) -> List[str]:
+    seen: Set[str] = set()
+    ordered: List[str] = []
+    for phase in phases or DEFAULT_PHASES:
+        phase_name = str(phase).strip().lower()
+        if not phase_name or phase_name in seen:
+            continue
+        seen.add(phase_name)
+        ordered.append(phase_name)
+    return ordered
+
+
+def _init_job_entry(job_id: str, docs: Sequence[QueuedBatchDoc], *, phases: Sequence[str]) -> None:
     doc_entries: List[Dict[str, Any]] = []
     for idx, doc in enumerate(docs, start=1):
         doc_entries.append(
@@ -72,6 +115,7 @@ def _init_job_entry(job_id: str, docs: Sequence[QueuedBatchDoc]) -> None:
         "total_docs": len(doc_entries),
         "file": doc_entries[0]["file"] if len(doc_entries) == 1 else f"{len(doc_entries)} documents",
         "hash": doc_entries[0]["hash"] if len(doc_entries) == 1 else None,
+        "phases": list(phases),
     }
 
 
@@ -108,7 +152,7 @@ async def _job_worker() -> None:
     while True:
         job = await _job_queue.get()
         try:
-            await _process_job(job.job_id, job.docs)
+            await _process_job(job.job_id, job.docs, job.phases)
         except asyncio.CancelledError:
             _job_queue.put_nowait(job)
             raise
@@ -118,7 +162,7 @@ async def _job_worker() -> None:
             _job_queue.task_done()
 
 
-async def _process_job(job_id: str, docs: Sequence[QueuedBatchDoc]) -> None:
+async def _process_job(job_id: str, docs: Sequence[QueuedBatchDoc], phases: Sequence[str]) -> None:
     info = jobs_registry.get(job_id)
     if not info:
         return
@@ -133,10 +177,23 @@ async def _process_job(job_id: str, docs: Sequence[QueuedBatchDoc]) -> None:
     doc_by_hash = {entry.get("hash"): entry for entry in doc_entries}
     info["status"] = "running"
 
+    phase_order = _normalize_phases(phases)
+    if not phase_order:
+        info["status"] = "error"
+        _set_job_progress(job_id, "error", 0.0, stage="no_phases", message="No phases requested")
+        return
+
+    context: Dict[str, Any] = {"ocr_payloads": {}}
+    had_errors = False
+    current_docs: Sequence[QueuedBatchDoc] = docs
+
     try:
-        await gpu_phase_manager.switch_to_no_llm(reason=f"ingest:{job_id}")
+        if "ocr" in phase_order:
+            await gpu_phase_manager.switch_to_no_llm(reason=f"ingest:{job_id}")
+        elif "postprocess" in phase_order:
+            await gpu_phase_manager.switch_to_no_llm(reason=f"postprocess:{job_id}")
     except Exception as exc:
-        error_msg = f"GPU not available for OCR: {exc}"
+        error_msg = f"GPU not available: {exc}"
         _set_job_progress(job_id, "error", 0.0, stage="gpu_unavailable", message=error_msg)
         for entry in doc_entries:
             entry["status"] = "error"
@@ -147,20 +204,38 @@ async def _process_job(job_id: str, docs: Sequence[QueuedBatchDoc]) -> None:
         info["status"] = "error"
         return
 
-    successful_docs, ocr_payloads, ocr_errors = await _run_ocr_phase(
-        job_id, docs, doc_by_hash, total_docs
-    )
+    phase_count = len(phase_order)
+    for idx, phase_name in enumerate(phase_order):
+        start_pct = (idx / phase_count) * 100.0
+        end_pct = ((idx + 1) / phase_count) * 100.0
 
-    if not successful_docs:
-        info["status"] = "error"
-        _set_job_progress(job_id, "error", 50.0, stage="ocr_failed", message="All OCR attempts failed")
-        return
+        if phase_name == "ocr":
+            successful_docs, ocr_payloads, ocr_errors = await _run_ocr_phase(
+                job_id, current_docs, doc_by_hash, total_docs, start_percent=start_pct, end_percent=end_pct
+            )
+            context["ocr_payloads"] = ocr_payloads
+            current_docs = successful_docs
+            had_errors = had_errors or bool(ocr_errors) or not successful_docs
+            if not successful_docs:
+                break
+            continue
 
-    postprocess_errors = await _run_postprocess_phase(
-        job_id, successful_docs, doc_by_hash, ocr_payloads
-    )
+        if phase_name == "postprocess":
+            postprocess_errors = await _run_postprocess_phase(
+                job_id,
+                current_docs,
+                doc_by_hash,
+                context.get("ocr_payloads") or {},
+                start_percent=start_pct,
+                end_percent=end_pct,
+            )
+            had_errors = had_errors or bool(postprocess_errors)
+            continue
 
-    had_errors = bool(ocr_errors) or bool(postprocess_errors) or any(entry.get("status") == "error" for entry in doc_entries)
+        logger.warning("Unknown phase '%s' for job %s; skipping", phase_name, job_id)
+        _set_job_progress(job_id, "warning", start_pct, stage="unknown_phase", phase=phase_name)
+
+    had_errors = had_errors or any(entry.get("status") == "error" for entry in doc_entries)
     info["status"] = "error" if had_errors else "done"
     final_stage = "failed" if had_errors else "done"
     _set_job_progress(job_id, "completed" if not had_errors else "error", 100.0, stage=final_stage)
@@ -171,8 +246,15 @@ async def _run_ocr_phase(
     docs: Sequence[QueuedBatchDoc],
     doc_by_hash: Dict[str, Dict[str, Any]],
     total_docs: int,
+    *,
+    start_percent: float = 0.0,
+    end_percent: float = 50.0,
 ) -> tuple[List[QueuedBatchDoc], Dict[str, Dict[str, Any]], Dict[str, str]]:
-    _set_job_progress(job_id, "ocr", 0.0, stage="starting", total_docs=total_docs)
+    _set_job_progress(job_id, "ocr", start_percent, stage="starting", total_docs=total_docs)
+
+    if total_docs == 0:
+        _set_job_progress(job_id, "ocr", end_percent, stage="empty")
+        return [], {}, {}
 
     ocr_payloads: Dict[str, Dict[str, Any]] = {}
     successful_docs: List[QueuedBatchDoc] = []
@@ -237,10 +319,35 @@ async def _run_ocr_phase(
                 await document_store.finish_job(doc.job_record_id, "error", error=error_msg)
             logger.exception("OCR failed for %s: %s", doc.doc_path, exc)
         finally:
-            percent = (index / total_docs) * 50.0
+            phase_span = max(0.0, end_percent - start_percent)
+            percent = start_percent + (index / total_docs) * phase_span if total_docs else end_percent
             _set_job_progress(job_id, "ocr", percent, stage=f"{index}/{total_docs}")
 
     return successful_docs, ocr_payloads, errors
+
+
+async def _get_ocr_payload_for_doc(doc_hash: str, existing: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    if doc_hash in existing and existing[doc_hash].get("text"):
+        return existing[doc_hash]
+    extraction = await document_store.get_extraction(doc_hash, settings.ocr_parser_key)
+    if not extraction:
+        return {}
+    ocr_text = (extraction.get("text") or "").strip()
+    if not ocr_text:
+        return {}
+    meta = extraction.get("metadata") or {}
+    payload: Dict[str, Any] = {"text": ocr_text, "metadata": meta}
+    try:
+        prev_metrics = await document_store.get_performance_metrics(doc_hash)
+        if prev_metrics and prev_metrics.get("ocr_time_sec") is not None:
+            try:
+                payload["ocr_time"] = float(prev_metrics["ocr_time_sec"])
+            except (TypeError, ValueError):
+                payload["ocr_time"] = prev_metrics.get("ocr_time_sec")
+    except Exception:  # pragma: no cover - best-effort metrics lookup
+        pass
+    existing[doc_hash] = payload
+    return payload
 
 
 async def _run_postprocess_phase(
@@ -248,11 +355,18 @@ async def _run_postprocess_phase(
     docs: Sequence[QueuedBatchDoc],
     doc_by_hash: Dict[str, Dict[str, Any]],
     ocr_payloads: Dict[str, Dict[str, Any]],
+    *,
+    start_percent: float = 50.0,
+    end_percent: float = 100.0,
 ) -> Dict[str, str]:
     chunk_specs = build_chunk_specs()
-    _set_job_progress(job_id, "postprocess", 50.0, stage="starting", total_docs=len(docs))
+    _set_job_progress(job_id, "postprocess", start_percent, stage="starting", total_docs=len(docs))
     emb_client = EmbeddingClient()
     post_total = len(docs)
+    phase_span = max(0.0, end_percent - start_percent)
+    if post_total == 0:
+        _set_job_progress(job_id, "postprocess", end_percent, stage="empty")
+        return {}
     processed_docs = 0
     errors: Dict[str, str] = {}
 
@@ -260,7 +374,7 @@ async def _run_postprocess_phase(
         doc_entry = doc_by_hash.get(doc.doc_hash)
         if not doc_entry:
             continue
-        payload = ocr_payloads.get(doc.doc_hash) or {}
+        payload = await _get_ocr_payload_for_doc(doc.doc_hash, ocr_payloads)
         ocr_text = payload.get("text") or ""
         if not ocr_text:
             error_msg = "missing_ocr_text"
@@ -268,8 +382,6 @@ async def _run_postprocess_phase(
             _update_doc_progress(doc_entry, "chunking", 0.0, stage="failed", error=error_msg)
             errors[doc.doc_hash] = error_msg
             continue
-
-        await document_store.update_document_status(doc.doc_hash, "processing")
 
         def chunk_progress_callback(data: Dict[str, Any]) -> None:
             if not data:
@@ -335,7 +447,7 @@ async def _run_postprocess_phase(
             )
 
         try:
-            result = await run_postprocess_pipeline(
+            result = await run_postprocess_for_doc(
                 doc.doc_hash,
                 ocr_text=ocr_text,
                 emb_client=emb_client,
@@ -365,14 +477,13 @@ async def _run_postprocess_phase(
             errors[doc.doc_hash] = error_msg
             doc_entry["status"] = "error"
             _update_doc_progress(doc_entry, "chunking", doc_entry.get("progress", {}).get("percent", 0.0), stage="failed", error=error_msg)
-            await document_store.update_document_status(doc.doc_hash, "error", error=error_msg)
             if doc.job_record_id:
                 await document_store.finish_job(doc.job_record_id, "error", error=error_msg)
             logger.exception("Chunking/embedding failed for %s: %s", doc.doc_hash, exc)
             continue
 
         processed_docs += 1
-        percent = 50.0 + (processed_docs / post_total) * 50.0
+        percent = start_percent + (processed_docs / post_total) * phase_span if post_total else end_percent
         _set_job_progress(job_id, "postprocess", percent, stage=f"{processed_docs}/{post_total}")
 
     return errors

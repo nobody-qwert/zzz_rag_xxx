@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Sequence
+
+JobPhase = str
 
 
 @dataclass
@@ -17,3 +19,4 @@ class QueuedBatchDoc:
 class QueuedBatchJob:
     job_id: str
     docs: List[QueuedBatchDoc]
+    phases: Sequence[JobPhase] = field(default_factory=list)

@@ -12,7 +12,8 @@ except ImportError:  # pragma: no cover
     from embeddings import EmbeddingClient  # type: ignore
 
 from .context import document_store, gpu_phase_manager, jobs_registry, settings
-from .pipeline import build_chunk_specs, run_postprocess_pipeline
+from .pipeline import build_chunk_specs
+from .postprocess_runner import run_postprocess_for_doc
 
 _reprocess_all_lock = asyncio.Lock()
 
@@ -45,10 +46,9 @@ async def reprocess_after_ocr(doc_hash: str, *, ensure_gpu_phase: bool = True) -
         except Exception as exc:
             raise HTTPException(status_code=503, detail=f"GPU not available for preprocessing: {exc}") from exc
 
-    await document_store.update_document_status(doc_hash, "processing")
-
     try:
         emb_client = EmbeddingClient()
+        chunk_specs = build_chunk_specs()
         prev_metrics = await document_store.get_performance_metrics(doc_hash)
         ocr_time_val: Optional[float] = None
         if prev_metrics:
@@ -58,11 +58,11 @@ async def reprocess_after_ocr(doc_hash: str, *, ensure_gpu_phase: bool = True) -
             except (TypeError, ValueError):
                 ocr_time_val = prev_metrics.get("ocr_time_sec")
 
-        result = await run_postprocess_pipeline(
+        result = await run_postprocess_for_doc(
             doc_hash,
             ocr_text=ocr_text,
             emb_client=emb_client,
-            chunk_specs=build_chunk_specs(),
+            chunk_specs=chunk_specs,
             ocr_time=ocr_time_val,
         )
 
