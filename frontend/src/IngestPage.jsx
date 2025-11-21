@@ -190,20 +190,20 @@ const styles = {
   miniProgressLabel: { fontSize: 11, color: "rgba(226, 232, 240, 0.8)", minWidth: 46, textAlign: "right" },
   previewText: {
     border: "none",
-    borderRadius: 22,
+    borderRadius: 20,
     background: "rgba(23, 28, 60, 0.97)",
-    padding: 18,
+    padding: 14,
     flex: 1,
     minHeight: 0,
     overflow: "auto",
-    boxShadow: "0 22px 38px rgba(0, 0, 0, 0.5), inset 0 0 0 2px rgba(99, 102, 241, 0.14)",
+    boxShadow: "0 18px 30px rgba(0, 0, 0, 0.45), inset 0 0 0 2px rgba(99, 102, 241, 0.14)",
   },
-  previewMetaSections: { display: "flex", flexDirection: "column", gap: 12 },
+  previewMetaSections: { display: "flex", flexDirection: "column", gap: 8 },
   previewStatsLine: {
     display: "flex",
     flexWrap: "wrap",
-    gap: 12,
-    marginBottom: 4,
+    gap: 8,
+    marginBottom: 2,
     fontSize: 12,
     lineHeight: 1.3,
     color: "rgba(226, 232, 240, 0.9)",
@@ -211,15 +211,15 @@ const styles = {
   previewStatsItem: { whiteSpace: "nowrap" },
   previewStatsLabel: { opacity: 0.65, marginRight: 4 },
   previewStatsClassification: { display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap", color: "rgba(226, 232, 240, 0.95)" },
-  previewMetaLayout: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 },
+  previewMetaLayout: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 },
   previewMetaBlock: {
-    borderRadius: 20,
-    padding: "16px 18px",
+    borderRadius: 18,
+    padding: "12px 14px",
     background: "rgba(25, 33, 74, 0.92)",
-    boxShadow: "0 22px 34px rgba(4, 7, 21, 0.6)",
+    boxShadow: "0 18px 28px rgba(4, 7, 21, 0.55)",
     display: "flex",
     flexDirection: "column",
-    gap: 8,
+    gap: 6,
     minHeight: 0,
   },
   previewMetaTitle: { fontSize: 12, letterSpacing: 0.5, textTransform: "uppercase", color: "rgba(148, 163, 184, 0.9)" },
@@ -984,8 +984,8 @@ export default function IngestPage({ systemStatus = {} }) {
           {selectedDoc ? (
             <>
               {/* Document Metadata Section */}
-              <div style={{ background: "rgba(33, 42, 88, 0.94)", border: "none", borderRadius: 24, padding: 20, marginBottom: 18, boxShadow: "0 26px 46px rgba(5, 9, 25, 0.6)" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+              <div style={{ background: "rgba(33, 42, 88, 0.94)", border: "none", borderRadius: 20, padding: 16, marginBottom: 10, boxShadow: "0 22px 38px rgba(5, 9, 25, 0.5)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
                   <span style={{ fontSize: 18 }}>📄</span>
                   <strong style={{ fontSize: 15, color: "#e2e8f0", flex: 1, minWidth: 0, wordBreak: "break-word" }}>
                     {previewInfo?.document_name || selectedDoc.name}
