@@ -633,17 +633,22 @@ export default function IngestPage({ systemStatus = {} }) {
     if (!hash) return;
     setReprocessingHash(hash);
     const short = shortHash(hash);
-    setUploadStatus(`Retrying preprocessing for ${short}...`);
+    setUploadStatus(`Queueing preprocessing for ${short}...`);
     try {
       const res = await fetch(api.preprocess(hash), { method: "POST" });
       const data = await readJsonSafe(res);
       if (!res.ok) throw new Error((data && (data.detail || data.error || data.raw)) || res.statusText);
-      const chunkCount = Number(data.chunk_count ?? data.total_chunks ?? data.small_chunks ?? 0) || 0;
-      const embCount = Number(data.total_embeddings ?? data.embedding_count ?? 0) || 0;
-      const summary = [`Preprocessing complete for ${short}`];
-      if (chunkCount > 0) summary.push(`${chunkCount} chunk${chunkCount === 1 ? "" : "s"}`);
-      if (embCount > 0) summary.push(`${embCount} embedding${embCount === 1 ? "" : "s"}`);
-      setUploadStatus(summary.join(" • "));
+      const jobId = data.job_id;
+      const queuedDocs = Number(data.queued_docs ?? data.total_docs ?? 1) || 1;
+      if (jobId) {
+        setActiveJobs(prev => new Set([...prev, jobId]));
+        const summary = [`Queued preprocessing for ${short}`];
+        if (queuedDocs > 1) summary.push(`${queuedDocs} docs`);
+        summary.push(`job ${jobId}`);
+        setUploadStatus(summary.join(" • "));
+      } else {
+        setUploadStatus(`No preprocessing needed for ${short}.`);
+      }
       void refreshDocs();
     } catch (e) {
       setUploadStatus(`Preprocess retry failed: ${e.message || String(e)}`);
@@ -654,19 +659,27 @@ export default function IngestPage({ systemStatus = {} }) {
 
   const handleReprocessAll = useCallback(async () => {
     setReprocessingAll(true);
-    setUploadStatus("Reprocessing all documents...");
+    setUploadStatus("Queueing bulk reprocess...");
     try {
       const res = await fetch(api.reprocessAll, { method: "POST" });
       const data = await readJsonSafe(res);
       if (!res.ok) throw new Error((data && (data.detail || data.error || data.raw)) || res.statusText);
-      const processed = Number(data.processed ?? data.success ?? 0) || 0;
-      const failed = Number(data.failed ?? 0) || 0;
+      const jobId = data.job_id;
+      const queuedDocs = Number(data.queued_docs ?? data.total_docs ?? 0) || 0;
       const skipped = Number(data.skipped ?? 0) || 0;
-      const summaryParts = [];
-      summaryParts.push(`Processed ${processed} document${processed === 1 ? "" : "s"}`);
-      if (skipped > 0) summaryParts.push(`Skipped ${skipped}`);
-      if (failed > 0) summaryParts.push(`${failed} failed`);
-      setUploadStatus(summaryParts.join(" • "));
+      if (jobId) {
+        setActiveJobs(prev => new Set([...prev, jobId]));
+        const summaryParts = [`Queued reprocess for ${queuedDocs} document${queuedDocs === 1 ? "" : "s"}`];
+        if (skipped > 0) summaryParts.push(`${skipped} skipped`);
+        summaryParts.push(`job ${jobId}`);
+        setUploadStatus(summaryParts.join(" • "));
+      } else {
+        if (skipped > 0) {
+          setUploadStatus(`No eligible documents. ${skipped} skipped.`);
+        } else {
+          setUploadStatus("No documents to reprocess.");
+        }
+      }
       void refreshDocs();
     } catch (e) {
       setUploadStatus(`Bulk reprocess failed: ${e.message || String(e)}`);

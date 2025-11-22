@@ -6,10 +6,11 @@ from .api import (
     get_job_status,
     ingest_file,
     ingest_files,
+    reprocess_after_ocr,
+    reprocess_all_documents,
     retry_ingest,
     warmup_mineru,
 )
-from .reprocess import reprocess_after_ocr, reprocess_all_documents
 
 __all__ = [
     "ingest_file",

@@ -9,7 +9,7 @@ from .context import document_store, jobs_registry, settings
 from .models import QueuedBatchDoc
 from .ocr import warmup_mineru as warmup_mineru_call
 from .uploads import prepare_upload
-from .worker import queue_batch_job, queue_classification_job
+from .worker import queue_batch_job, queue_classification_job, queue_postprocess_job
 
 
 async def ingest_file(file: UploadFile) -> Dict[str, Any]:
@@ -142,3 +142,85 @@ async def classify_document(doc_hash: str) -> Dict[str, Any]:
 
 async def warmup_mineru() -> Dict[str, Any]:
     return await warmup_mineru_call()
+
+
+def _active_jobs_for_doc(doc_hash: str) -> List[str]:
+    return [
+        jid
+        for jid, info in jobs_registry.items()
+        if info.get("status") in {"queued", "running"}
+        and any(d.get("hash") == doc_hash for d in info.get("docs", []))
+    ]
+
+
+async def _ensure_doc_ready_for_postprocess(doc_hash: str) -> Dict[str, Any]:
+    doc = await document_store.get_document(doc_hash)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    active_jobs = _active_jobs_for_doc(doc_hash)
+    if active_jobs:
+        raise HTTPException(status_code=409, detail=f"Document is currently processing (jobs: {', '.join(active_jobs)})")
+
+    extraction = await document_store.get_extraction(doc_hash, settings.ocr_parser_key)
+    if not extraction:
+        raise HTTPException(status_code=404, detail="No OCR extraction found; re-run OCR first")
+
+    ocr_text = (extraction.get("text") or "").strip()
+    if not ocr_text:
+        raise HTTPException(status_code=400, detail="OCR extraction is empty; re-run OCR first")
+
+    return doc
+
+
+async def reprocess_after_ocr(doc_hash: str) -> Dict[str, Any]:
+    doc = await _ensure_doc_ready_for_postprocess(doc_hash)
+    job_id = await queue_postprocess_job([doc_hash])
+    return {
+        "job_id": job_id,
+        "status": "queued",
+        "hash": doc_hash,
+        "file": doc.get("original_name") or doc_hash,
+        "phase": "postprocess",
+        "queued_docs": 1,
+    }
+
+
+async def reprocess_all_documents() -> Dict[str, Any]:
+    docs = await document_store.list_documents()
+    eligible_hashes: List[str] = []
+    skipped: List[Dict[str, Any]] = []
+
+    for doc in docs:
+        doc_hash = doc.get("doc_hash")
+        if not doc_hash:
+            skipped.append({"hash": None, "reason": "missing_hash"})
+            continue
+        try:
+            await _ensure_doc_ready_for_postprocess(doc_hash)
+            eligible_hashes.append(doc_hash)
+        except HTTPException as exc:
+            detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+            skipped.append({"hash": doc_hash, "reason": detail, "status_code": exc.status_code})
+
+    if not eligible_hashes:
+        return {
+            "job_id": None,
+            "status": "skipped",
+            "phase": "postprocess",
+            "queued_docs": 0,
+            "total_docs": len(docs),
+            "skipped": len(skipped),
+            "skipped_docs": skipped,
+        }
+
+    job_id = await queue_postprocess_job(eligible_hashes)
+    return {
+        "job_id": job_id,
+        "status": "queued",
+        "phase": "postprocess",
+        "queued_docs": len(eligible_hashes),
+        "total_docs": len(docs),
+        "skipped": len(skipped),
+        "skipped_docs": skipped,
+    }
