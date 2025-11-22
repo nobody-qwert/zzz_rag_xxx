@@ -175,13 +175,15 @@ async def _ensure_doc_ready_for_postprocess(doc_hash: str) -> Dict[str, Any]:
 
 async def reprocess_after_ocr(doc_hash: str) -> Dict[str, Any]:
     doc = await _ensure_doc_ready_for_postprocess(doc_hash)
-    job_id = await queue_postprocess_job([doc_hash])
+    phases = ["postprocess"]
+    job_id = await queue_postprocess_job([doc_hash], phases=phases)
     return {
         "job_id": job_id,
         "status": "queued",
         "hash": doc_hash,
         "file": doc.get("original_name") or doc_hash,
-        "phase": "postprocess",
+        "phase": phases[0],
+        "phases": phases,
         "queued_docs": 1,
     }
 
@@ -206,19 +208,29 @@ async def reprocess_all_documents() -> Dict[str, Any]:
     if not eligible_hashes:
         return {
             "job_id": None,
+            "postprocess_job_id": None,
+            "classification_job_id": None,
             "status": "skipped",
             "phase": "postprocess",
+            "phases": ["postprocess"],
             "queued_docs": 0,
             "total_docs": len(docs),
             "skipped": len(skipped),
             "skipped_docs": skipped,
         }
 
-    job_id = await queue_postprocess_job(eligible_hashes)
+    phases = ["postprocess"]
+    postprocess_job_id = await queue_postprocess_job(eligible_hashes, phases=phases)
+    for doc_hash in eligible_hashes:
+        await document_store.update_classification_status(doc_hash, "queued", error=None)
+    classification_job_id = await queue_classification_job(eligible_hashes)
     return {
-        "job_id": job_id,
+        "job_id": postprocess_job_id,
+        "postprocess_job_id": postprocess_job_id,
+        "classification_job_id": classification_job_id,
         "status": "queued",
-        "phase": "postprocess",
+        "phase": phases[0],
+        "phases": phases,
         "queued_docs": len(eligible_hashes),
         "total_docs": len(docs),
         "skipped": len(skipped),

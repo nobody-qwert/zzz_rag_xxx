@@ -659,25 +659,34 @@ export default function IngestPage({ systemStatus = {} }) {
 
   const handleReprocessAll = useCallback(async () => {
     setReprocessingAll(true);
-    setUploadStatus("Queueing bulk reprocess...");
+    setUploadStatus("Queueing bulk reprocess + reclassify...");
     try {
       const res = await fetch(api.reprocessAll, { method: "POST" });
       const data = await readJsonSafe(res);
       if (!res.ok) throw new Error((data && (data.detail || data.error || data.raw)) || res.statusText);
-      const jobId = data.job_id;
+      const jobId = data.postprocess_job_id || data.job_id;
+      const classificationJobId = data.classification_job_id;
       const queuedDocs = Number(data.queued_docs ?? data.total_docs ?? 0) || 0;
       const skipped = Number(data.skipped ?? 0) || 0;
-      if (jobId) {
-        setActiveJobs(prev => new Set([...prev, jobId]));
-        const summaryParts = [`Queued reprocess for ${queuedDocs} document${queuedDocs === 1 ? "" : "s"}`];
+      if (jobId || classificationJobId) {
+        setActiveJobs(prev => {
+          const next = new Set(prev);
+          if (jobId) next.add(jobId);
+          if (classificationJobId) next.add(classificationJobId);
+          return next;
+        });
+        const summaryParts = [`Queued reprocess + reclassify for ${queuedDocs} document${queuedDocs === 1 ? "" : "s"}`];
         if (skipped > 0) summaryParts.push(`${skipped} skipped`);
-        summaryParts.push(`job ${jobId}`);
+        if (jobId) summaryParts.push(`chunks job ${jobId}`);
+        if (classificationJobId && classificationJobId !== jobId) {
+          summaryParts.push(`class job ${classificationJobId}`);
+        }
         setUploadStatus(summaryParts.join(" • "));
       } else {
         if (skipped > 0) {
           setUploadStatus(`No eligible documents. ${skipped} skipped.`);
         } else {
-          setUploadStatus("No documents to reprocess.");
+          setUploadStatus("No documents to reprocess/reclassify.");
         }
       }
       void refreshDocs();

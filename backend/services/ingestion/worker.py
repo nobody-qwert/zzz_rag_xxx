@@ -55,7 +55,7 @@ async def queue_ocr_only_job(docs: Sequence[QueuedBatchDoc]) -> str:
     return await queue_batch_job(docs, phases=["ocr"])
 
 
-async def queue_postprocess_job(doc_hashes: Sequence[str]) -> str:
+async def queue_postprocess_job(doc_hashes: Sequence[str], *, phases: Optional[Sequence[str]] = None) -> str:
     if not doc_hashes:
         raise HTTPException(status_code=400, detail="No documents to postprocess")
     prepared_docs: List[QueuedBatchDoc] = []
@@ -72,7 +72,8 @@ async def queue_postprocess_job(doc_hashes: Sequence[str]) -> str:
                 display_name=display_name,
             )
         )
-    return await queue_batch_job(prepared_docs, phases=["postprocess"])
+    requested_phases = list(phases) if phases else ["postprocess"]
+    return await queue_batch_job(prepared_docs, phases=requested_phases)
 
 
 async def queue_classification_job(doc_hashes: Sequence[str]) -> str:

@@ -85,7 +85,11 @@ class GPUPhaseManager:
             if target == "no_llm" and self._ocr_url:
                 await self._call_control(self._ocr_url, "status", method="GET", ignore_missing=True)
             elif target == "llm" and self._llm_url:
-                await self._call_control(self._llm_url, "status", method="GET", ignore_missing=True)
+                status = await self._call_control(self._llm_url, "status", method="GET", ignore_missing=True)
+                if isinstance(status, dict) and not status.get("running"):
+                    logger.warning("LLM controller reports process not running; reloading to satisfy current phase")
+                    await self._call_control(self._llm_url, "load")
+                    await self._wait_for_llm_ready()
         except Exception as exc:  # pragma: no cover - best effort
             logger.debug("GPU phase refresh failed (%s): %s", target, exc)
 
@@ -96,16 +100,18 @@ class GPUPhaseManager:
         *,
         method: str = "POST",
         ignore_missing: bool = False,
-    ) -> None:
+    ) -> Optional[Any]:
         url = f"{base_url.rstrip('/')}/{action.strip('/')}"
         timeout = httpx.Timeout(self._timeout, connect=min(5.0, self._timeout))
         async with httpx.AsyncClient(timeout=timeout) as client:
             try:
-                if method.upper() == "GET":
-                    resp = await client.get(url)
-                else:
-                    resp = await client.post(url)
+                request = client.get if method.upper() == "GET" else client.post
+                resp = await request(url)
                 resp.raise_for_status()
+                if resp.headers.get("content-type", "").lower().startswith("application/json"):
+                    with contextlib.suppress(Exception):
+                        return resp.json()
+                return None
             except Exception:
                 if ignore_missing:
                     raise
