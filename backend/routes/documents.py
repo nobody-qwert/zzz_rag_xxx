@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 
 try:
     from ..chunking import count_text_tokens
@@ -16,6 +19,24 @@ except ImportError:  # pragma: no cover
     from services.ingestion import delete_document as delete_document_service  # type: ignore
 
 router = APIRouter()
+
+
+def _parse_meta(raw: Any) -> Dict[str, Any]:
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    text: Optional[str]
+    if isinstance(raw, (bytes, bytearray)):
+        text = raw.decode("utf-8", errors="ignore")
+    else:
+        text = str(raw)
+    if not text:
+        return {}
+    try:
+        return json.loads(text)
+    except Exception:
+        return {}
 
 
 @router.get("/documents")
@@ -102,6 +123,19 @@ async def debug_parsed_text(
     preview_limit = text_length if unlimited_preview else int(max_chars)
     preview_chars = min(preview_limit, text_length)
 
+    meta = _parse_meta(row.get("meta"))
+    asset_info = meta.get("assets") if isinstance(meta, dict) else {}
+    assets_payload: Optional[Dict[str, Any]] = None
+    if isinstance(asset_info, dict) and asset_info.get("base_dir"):
+        base_url = f"/api/documents/{doc_hash}/assets/"
+        images = asset_info.get("image_files") or []
+        content_lists = asset_info.get("content_lists") or []
+        assets_payload = {
+            "base_url": base_url,
+            "images": images,
+            "content_lists": content_lists,
+        }
+
     return {
         "parser": parser_key,
         "document_name": doc.get("original_name", "unknown"),
@@ -115,4 +149,41 @@ async def debug_parsed_text(
         "total_embeddings": total_embeddings,
         "small_embeddings": small_embeddings,
         "large_embeddings": large_embeddings,
+        "assets": assets_payload,
+        "image_blocks": meta.get("image_blocks") if isinstance(meta, dict) else None,
     }
+
+
+@router.get("/documents/{doc_hash}/assets/{asset_path:path}")
+async def get_document_asset(doc_hash: str, asset_path: str):
+    if not asset_path:
+        raise HTTPException(status_code=400, detail="Asset path required")
+    row = await document_store.get_extraction(doc_hash, settings.ocr_parser_key)
+    if not row:
+        raise HTTPException(status_code=404, detail="Document not found")
+    meta = _parse_meta(row.get("meta"))
+    assets = meta.get("assets") if isinstance(meta, dict) else None
+    base_dir_raw = assets.get("base_dir") if isinstance(assets, dict) else None
+    if not base_dir_raw:
+        markdown_path = meta.get("markdown_path") if isinstance(meta, dict) else None
+        if markdown_path:
+            base_dir_raw = str(Path(markdown_path).parent)
+    if not base_dir_raw:
+        raise HTTPException(status_code=404, detail="No assets available for this document")
+
+    base_dir = Path(base_dir_raw).resolve()
+    allowed_root = settings.index_dir.resolve()
+    try:
+        base_dir.relative_to(allowed_root)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Asset location is invalid")
+
+    target_path = (base_dir / asset_path.lstrip("/")).resolve()
+    try:
+        target_path.relative_to(base_dir)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid asset path")
+    if not target_path.exists() or not target_path.is_file():
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    return FileResponse(target_path)

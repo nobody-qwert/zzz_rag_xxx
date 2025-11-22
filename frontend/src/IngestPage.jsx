@@ -222,6 +222,16 @@ const styles = {
     gap: 6,
     minHeight: 0,
   },
+  previewImage: {
+    maxWidth: "100%",
+    height: "auto",
+    display: "block",
+    margin: "12px auto",
+    borderRadius: 12,
+    background: "rgba(15, 23, 42, 0.85)",
+    padding: 6,
+    border: "1px solid rgba(148, 163, 184, 0.2)",
+  },
   previewMetaTitle: { fontSize: 12, letterSpacing: 0.5, textTransform: "uppercase", color: "rgba(148, 163, 184, 0.9)" },
   previewMetaBody: { fontSize: 13, color: "#e2e8f0", lineHeight: 1.45 },
   previewMetaFooter: { fontSize: 12, color: "rgba(148, 163, 184, 0.85)" },
@@ -257,7 +267,7 @@ const styles = {
 
 const markdownRemarkPlugins = [remarkGfm, remarkMath];
 const markdownRehypePlugins = [rehypeRaw, rehypeKatex];
-const markdownComponents = {
+const baseMarkdownComponents = {
   table: (props) => <table style={styles.markdownTable} {...props} />,
   th: (props) => <th style={styles.tableCell} {...props} />,
   td: (props) => <td style={styles.tableCell} {...props} />,
@@ -337,6 +347,7 @@ export default function IngestPage({ systemStatus = {} }) {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState("");
   const [previewInfo, setPreviewInfo] = useState(null);
+  const [previewAssets, setPreviewAssets] = useState(null);
   const [previewMaxChars, setPreviewMaxChars] = useState(2000);
   const [limitPreview, setLimitPreview] = useState(true);
   const parser = FALLBACK_PARSER;
@@ -359,6 +370,43 @@ export default function IngestPage({ systemStatus = {} }) {
       : readyDocCount === 0
         ? "Ingest at least one document to unlock chat."
         : "";
+
+  const resolveAssetSrc = useCallback((src) => {
+    if (src == null) return src;
+    const trimmed = String(src).trim();
+    if (!trimmed) return trimmed;
+    if (/^[a-z]+:/i.test(trimmed) || trimmed.startsWith("data:") || trimmed.startsWith("//")) {
+      return trimmed;
+    }
+    if (trimmed.startsWith("/") && !trimmed.startsWith("./") && !trimmed.startsWith("../")) {
+      return trimmed;
+    }
+    const baseUrl = previewAssets?.base_url;
+    if (!baseUrl) return trimmed;
+    let normalized = trimmed.replace(/^(\.\/)+/, "");
+    normalized = normalized.replace(/^\/+/, "");
+    if (!normalized || normalized.startsWith("..")) {
+      return trimmed;
+    }
+    const separator = baseUrl.endsWith("/") ? "" : "/";
+    return `${baseUrl}${separator}${normalized}`;
+  }, [previewAssets]);
+
+  const markdownComponents = useMemo(() => ({
+    ...baseMarkdownComponents,
+    img: ({ node, ...props }) => {
+      const { src, style, ...rest } = props;
+      const resolved = resolveAssetSrc(src);
+      return (
+        <img
+          {...rest}
+          src={resolved}
+          style={{ ...styles.previewImage, ...(style || {}) }}
+          alt={props.alt || ""}
+        />
+      );
+    },
+  }), [resolveAssetSrc]);
 
   const refreshDocs = useCallback(async () => {
     setDocsLoading(true);
@@ -767,6 +815,7 @@ export default function IngestPage({ systemStatus = {} }) {
         setPreview("");
         setPreviewInfo(null);
         setPreviewError("");
+        setPreviewAssets(null);
       }
       setExpandedPerf(prev => {
         const next = new Set(prev);
@@ -791,6 +840,7 @@ export default function IngestPage({ systemStatus = {} }) {
     if (!preserveContent) {
       setPreview("");
       setPreviewInfo(null);
+      setPreviewAssets(null);
     }
     setPreviewError("");
     setPreviewLoading(true);
@@ -822,8 +872,10 @@ export default function IngestPage({ systemStatus = {} }) {
         truncated: !!data.truncated,
         parser,
       });
+      setPreviewAssets(data.assets && typeof data.assets === "object" ? data.assets : null);
     } catch (e) {
       setPreviewError(e.message || String(e));
+      setPreviewAssets(null);
     } finally {
       setPreviewLoading(false);
     }
