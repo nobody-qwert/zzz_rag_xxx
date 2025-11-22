@@ -198,7 +198,6 @@ const styles = {
     flex: 1,
     minHeight: 0,
     overflow: "auto",
-    boxShadow: "0 18px 30px rgba(0, 0, 0, 0.45), inset 0 0 0 2px rgba(99, 102, 241, 0.14)",
   },
   previewMetaSections: { display: "flex", flexDirection: "column", gap: 6 },
   previewStatsLine: {
@@ -218,7 +217,6 @@ const styles = {
     borderRadius: 18,
     padding: "10px 12px",
     background: "rgba(25, 33, 74, 0.92)",
-    boxShadow: "0 18px 28px rgba(4, 7, 21, 0.55)",
     display: "flex",
     flexDirection: "column",
     gap: 6,
