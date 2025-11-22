@@ -66,7 +66,7 @@ const styles = {
   page: {
     display: "grid",
     gridTemplateColumns: "var(--ingest-grid-columns, minmax(0, 1.65fr) minmax(320px, 1.1875fr))",
-    gap: 20,
+    gap: 16,
     alignItems: "stretch",
     width: "100%",
     minHeight: "var(--ingest-left-min-height, calc(100vh - 64px))",
@@ -74,7 +74,7 @@ const styles = {
   leftColumn: {
     display: "grid",
     gridTemplateRows: "auto minmax(0, 1fr)",
-    gap: 18,
+    gap: 14,
     minWidth: 0,
     minHeight: "var(--ingest-left-min-height, calc(100vh - 64px))",
     height: "var(--ingest-left-min-height, calc(100vh - 64px))",
@@ -83,10 +83,11 @@ const styles = {
     display: "flex",
     flexDirection: "column",
     overflow: "hidden",
-    gap: 12,
+    gap: 8,
+    padding: "10px 14px",
   },
   uploadProgressList: {
-    marginTop: 12,
+    marginTop: 8,
     flex: 1,
     minHeight: 0,
     maxHeight: "var(--ingest-upload-scroll-height, calc(5 * 58px))",
@@ -98,10 +99,11 @@ const styles = {
     flexDirection: "column",
     minHeight: 0,
     overflow: "hidden",
+    padding: "14px 16px",
   },
-  previewBody: { flex: 1, display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" },
+  previewBody: { flex: 1, display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden", gap: 12 },
   previewContent: { flex: 1, display: "flex", flexDirection: "column", minHeight: 0 },
-  previewHeaderRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 6 },
+  previewHeaderRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 4 },
   previewTitle: { fontSize: 13, fontWeight: 600, color: "rgba(148, 163, 184, 0.9)" },
   previewLimiterControls: { display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" },
   previewLimitToggle: { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "rgba(148, 163, 184, 0.85)" },
@@ -112,8 +114,8 @@ const styles = {
     width: "100%",
     display: "flex",
     flexDirection: "column",
-    gap: 8,
-    padding: "8px 10px",
+    gap: 6,
+    padding: "6px 8px",
     position: "var(--ingest-library-position, sticky)",
     top: "var(--ingest-library-top, 16px)",
     height: "var(--ingest-library-height, calc(100vh - 64px))",
@@ -192,13 +194,13 @@ const styles = {
     border: "none",
     borderRadius: 20,
     background: "rgba(23, 28, 60, 0.97)",
-    padding: 14,
+    padding: 12,
     flex: 1,
     minHeight: 0,
     overflow: "auto",
     boxShadow: "0 18px 30px rgba(0, 0, 0, 0.45), inset 0 0 0 2px rgba(99, 102, 241, 0.14)",
   },
-  previewMetaSections: { display: "flex", flexDirection: "column", gap: 8 },
+  previewMetaSections: { display: "flex", flexDirection: "column", gap: 6 },
   previewStatsLine: {
     display: "flex",
     flexWrap: "wrap",
@@ -211,10 +213,10 @@ const styles = {
   previewStatsItem: { whiteSpace: "nowrap" },
   previewStatsLabel: { opacity: 0.65, marginRight: 4 },
   previewStatsClassification: { display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap", color: "rgba(226, 232, 240, 0.95)" },
-  previewMetaLayout: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 },
+  previewMetaLayout: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 8 },
   previewMetaBlock: {
     borderRadius: 18,
-    padding: "12px 14px",
+    padding: "10px 12px",
     background: "rgba(25, 33, 74, 0.92)",
     boxShadow: "0 18px 28px rgba(4, 7, 21, 0.55)",
     display: "flex",
@@ -989,7 +991,7 @@ export default function IngestPage({ systemStatus = {} }) {
       <div className="ingest-layout" style={styles.page}>
       <div style={styles.leftColumn}>
         <section style={{ ...styles.card, ...styles.uploadCard }}>
-          <div style={{ ...styles.row, marginBottom: 12, justifyContent: "space-between", alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ ...styles.row, marginBottom: 8, justifyContent: "space-between", alignItems: "center", flexWrap: "wrap" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
               <input
                 ref={fileInputRef}
@@ -1087,7 +1089,7 @@ export default function IngestPage({ systemStatus = {} }) {
           {selectedDoc ? (
             <>
               {/* Document Metadata Section */}
-              <div style={{ background: "rgba(33, 42, 88, 0.94)", border: "none", borderRadius: 20, padding: 16, marginBottom: 10, boxShadow: "0 22px 38px rgba(5, 9, 25, 0.5)" }}>
+              <div style={{ background: "rgba(33, 42, 88, 0.94)", border: "none", borderRadius: 20, padding: 12, marginBottom: 10, boxShadow: "0 22px 38px rgba(5, 9, 25, 0.5)" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
                   <span style={{ fontSize: 18 }}>📄</span>
                   <strong style={{ fontSize: 15, color: "#e2e8f0", flex: 1, minWidth: 0, wordBreak: "break-word" }}>
