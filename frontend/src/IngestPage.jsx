@@ -1087,7 +1087,7 @@ export default function IngestPage({ systemStatus = {} }) {
           {selectedDoc ? (
             <>
               {/* Document Metadata Section */}
-              <div style={{ background: "rgba(33, 42, 88, 0.94)", border: "none", borderRadius: 20, padding: 12, marginBottom: 10, boxShadow: "0 22px 38px rgba(5, 9, 25, 0.5)" }}>
+              <div style={{ background: "rgba(33, 42, 88, 0.94)", border: "none", borderRadius: 20, padding: 12, marginBottom: 10 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
                   <span style={{ fontSize: 18 }}>📄</span>
                   <strong style={{ fontSize: 15, color: "#e2e8f0", flex: 1, minWidth: 0, wordBreak: "break-word" }}>
