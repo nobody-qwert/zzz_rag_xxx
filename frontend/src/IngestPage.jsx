@@ -323,7 +323,6 @@ export default function IngestPage({ systemStatus = {} }) {
 
   const [docs, setDocs] = useState([]);
   const [docsLoading, setDocsLoading] = useState(false);
-  const [files, setFiles] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState("");
   const [uploadProgress, setUploadProgress] = useState([]);
@@ -519,97 +518,123 @@ export default function IngestPage({ systemStatus = {} }) {
   const summaryRaw = typeof selectedDoc?.summary === "string" ? selectedDoc.summary.trim() : "";
   const summaryDisplayText = summaryRaw || "Summary will be shown here.";
 
-  const handleUploadAll = async () => {
-    if (files.length === 0) { setUploadStatus("Select files first."); return; }
-    
-    setUploading(true);
-    setUploadStatus(`Uploading ${files.length} file(s)...`);
-    
-    // Initialize progress tracking
-    const progress = files.map((f, idx) => ({
-      id: idx,
-      name: f.name,
-      status: "pending",
-      jobId: null,
-      error: null,
-      jobProgress: null,
-      jobHash: null,
-    }));
-    setUploadProgress(progress);
-    
-    const validFiles = [];
-    files.forEach((file, idx) => {
-      const isPdf = (file && (file.type === "application/pdf" || /\.pdf$/i.test(file.name)));
-      if (!isPdf) {
-        setUploadProgress(prev => prev.map((p, i) => 
-          i === idx ? { ...p, status: "error", error: "Only PDF files are supported" } : p
-        ));
+  const handleUploadAndIngest = useCallback(
+    async (selectedFiles) => {
+      const files = Array.isArray(selectedFiles) ? selectedFiles : [];
+      if (files.length === 0) {
+        setUploadStatus("No files selected.");
         return;
       }
-      validFiles.push({ file, idx });
-      setUploadProgress(prev => prev.map((p, i) => 
-        i === idx ? { ...p, status: "uploading" } : p
-      ));
-    });
 
-    if (validFiles.length === 0) {
-      setUploading(false);
-      setUploadStatus("No valid PDF files to upload.");
-      return;
-    }
+      setUploading(true);
+      setUploadStatus(`Uploading ${files.length} file(s)...`);
 
-    try {
-      const form = new FormData();
-      validFiles.forEach(({ file }) => form.append("files", file));
-      const res = await fetch(api.ingest, { method: "POST", body: form });
-      const data = await readJsonSafe(res);
-      if (!res.ok) throw new Error((data && (data.detail || data.error || data.raw)) || res.statusText);
+      // Initialize progress tracking
+      const progress = files.map((f, idx) => ({
+        id: idx,
+        name: f.name,
+        status: "pending",
+        jobId: null,
+        error: null,
+        jobProgress: null,
+        jobHash: null,
+      }));
+      setUploadProgress(progress);
 
-      const results = Array.isArray(data.results) ? [...data.results] : [];
-      setUploadProgress(prev => {
-        const queue = [...results];
-        return prev.map((item) => {
-          if (queue.length === 0) return item;
-          if (item.status === "uploading" || item.status === "pending") {
-            const result = queue.shift();
-            if (!result) return item;
-            const status = result.status || item.status;
-            const error = result.message || result.error || item.error;
-            return {
-              ...item,
-              status,
-              error: error || null,
-              jobId: result.job_id || data.job_id || item.jobId,
-              jobHash: result.hash || item.jobHash,
-              jobProgress: null,
-            };
-          }
-          return item;
-        });
+      const validFiles = [];
+      files.forEach((file, idx) => {
+        const isPdf = file && (file.type === "application/pdf" || /\.pdf$/i.test(file.name));
+        if (!isPdf) {
+          setUploadProgress((prev) =>
+            prev.map((p, i) =>
+              i === idx ? { ...p, status: "error", error: "Only PDF files are supported" } : p
+            )
+          );
+          return;
+        }
+        validFiles.push({ file, idx });
+        setUploadProgress((prev) =>
+          prev.map((p, i) => (i === idx ? { ...p, status: "uploading" } : p))
+        );
       });
 
-      if (data.job_id) {
-        setActiveJobs(prev => new Set([...prev, data.job_id]));
+      if (validFiles.length === 0) {
+        setUploading(false);
+        setUploadStatus("No valid PDF files to upload.");
+        return;
       }
 
-      const queuedCount = results.filter(r => r && r.status === "queued").length;
-      const skippedCount = results.filter(r => r && r.status === "skipped").length;
-      if (queuedCount > 0) {
-        setUploadStatus(`Queued ${queuedCount} document${queuedCount === 1 ? "" : "s"}.`);
-      } else if (skippedCount > 0) {
-        setUploadStatus(`Skipped ${skippedCount} already ingested document${skippedCount === 1 ? "" : "s"}.`);
-      } else {
-        setUploadStatus("Upload finished.");
-      }
+      try {
+        const form = new FormData();
+        validFiles.forEach(({ file }) => form.append("files", file));
+        const res = await fetch(api.ingest, { method: "POST", body: form });
+        const data = await readJsonSafe(res);
+        if (!res.ok) throw new Error((data && (data.detail || data.error || data.raw)) || res.statusText);
 
-      setFiles([]);
-      void refreshDocs();
-    } catch (err) {
-      setUploadStatus(err.message || String(err));
-    } finally {
-      setUploading(false);
-    }
-  };
+        const results = Array.isArray(data.results) ? [...data.results] : [];
+        setUploadProgress((prev) => {
+          const queue = [...results];
+          return prev.map((item) => {
+            if (queue.length === 0) return item;
+            if (item.status === "uploading" || item.status === "pending") {
+              const result = queue.shift();
+              if (!result) return item;
+              const status = result.status || item.status;
+              const error = result.message || result.error || item.error;
+              return {
+                ...item,
+                status,
+                error: error || null,
+                jobId: result.job_id || data.job_id || item.jobId,
+                jobHash: result.hash || item.jobHash,
+                jobProgress: null,
+              };
+            }
+            return item;
+          });
+        });
+
+        if (data.job_id) {
+          setActiveJobs((prev) => new Set([...prev, data.job_id]));
+        }
+
+        const queuedCount = results.filter((r) => r && r.status === "queued").length;
+        const skippedCount = results.filter((r) => r && r.status === "skipped").length;
+        if (queuedCount > 0) {
+          setUploadStatus(`Queued ${queuedCount} document${queuedCount === 1 ? "" : "s"}.`);
+        } else if (skippedCount > 0) {
+          setUploadStatus(`Skipped ${skippedCount} already ingested document${skippedCount === 1 ? "" : "s"}.`);
+        } else {
+          setUploadStatus("Upload finished.");
+        }
+
+        void refreshDocs();
+      } catch (err) {
+        setUploadStatus(err.message || String(err));
+      } finally {
+        setUploading(false);
+        if (fileInputRef.current) {
+          fileInputRef.current.value = "";
+        }
+      }
+    },
+    [api.ingest, refreshDocs]
+  );
+
+  const handleFileInputChange = useCallback(
+    (event) => {
+      const selectedFiles = Array.from(event?.target?.files || []);
+      if (event?.target) {
+        event.target.value = "";
+      }
+      if (selectedFiles.length === 0) {
+        setUploadStatus("No files selected.");
+        return;
+      }
+      void handleUploadAndIngest(selectedFiles);
+    },
+    [handleUploadAndIngest]
+  );
 
   const handleRetry = useCallback(async (hash) => {
     if (!hash) return; 
@@ -918,27 +943,20 @@ export default function IngestPage({ systemStatus = {} }) {
               type="file" 
               multiple 
               accept=".pdf,application/pdf"
-              onChange={(e) => setFiles(Array.from(e.target.files || []))} 
+              onChange={handleFileInputChange}
               style={styles.hiddenFileInput}
             />
             <button
               type="button"
               onClick={handleFilePickerClick}
               disabled={uploading}
-              style={{ ...styles.filePickerButton, opacity: uploading ? 0.6 : 1 }}
+              style={{ ...styles.button, opacity: uploading ? 0.6 : 1 }}
             >
-              Upload Files
-            </button>
-            <button 
-              onClick={handleUploadAll} 
-              disabled={uploading || files.length === 0} 
-              style={{ ...styles.button, opacity: uploading || files.length === 0 ? 0.6 : 1 }}
-            >
-              {uploading ? "Uploading…" : `Ingest ${files.length > 0 ? `(${files.length})` : ""}`}
+              {uploading ? "Uploading…" : "Upload & Ingest"}
             </button>
           </div>
           <div style={styles.feedback}>
-            {uploadStatus || (files.length > 0 ? `${files.length} file(s) selected` : "PDFs supported. Select multiple files.")}
+            {uploadStatus || "PDFs supported. Click to select files and they will ingest immediately."}
           </div>
           
           {/* Upload Progress */}

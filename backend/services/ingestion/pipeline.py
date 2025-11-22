@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import time
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from uuid import uuid4
 
 try:
     from ..chunking import ChunkWindowSpec, chunk_text_multi
@@ -118,12 +119,28 @@ async def process_document_text(
 
     specs = list(chunk_specs) if chunk_specs else build_chunk_specs()
 
+    def _scoped_chunk_id(raw_id: str) -> str:
+        raw_id = raw_id.strip()
+        if not raw_id:
+            return f"{doc_hash}-chunk-{uuid4().hex}"
+        if raw_id.startswith(doc_hash):
+            return raw_id
+        return f"{doc_hash}-{raw_id}"
+
     start_chunking = time.perf_counter()
     small_chunks, large_chunks = run_chunking(ocr_text, specs, progress_cb=chunk_progress_cb)
     if not small_chunks and not large_chunks:
         raise RuntimeError("Chunking produced no chunks; check chunking settings")
-    small_chunk_rows = [(c.chunk_id, c.order_index, c.text, c.token_count) for c in small_chunks]
-    large_chunk_rows = [(c.chunk_id, c.order_index, c.text, c.token_count) for c in large_chunks]
+
+    def _rows_for(chunks: Sequence[Any]) -> List[Tuple[str, int, str, int]]:
+        rows: List[Tuple[str, int, str, int]] = []
+        for chunk in chunks:
+            scoped_id = _scoped_chunk_id(getattr(chunk, "chunk_id", "") or "")
+            rows.append((scoped_id, chunk.order_index, chunk.text, chunk.token_count))
+        return rows
+
+    small_chunk_rows = _rows_for(small_chunks)
+    large_chunk_rows = _rows_for(large_chunks)
     chunking_time = time.perf_counter() - start_chunking
 
     if on_embedding_start:
