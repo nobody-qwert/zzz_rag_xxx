@@ -1244,6 +1244,8 @@ export default function IngestPage({ systemStatus = {} }) {
                   : (classificationError || undefined);
                 const canReclassify = Boolean(d.hash && isCompleted);
                 const reclassifyDisabled = classificationInProgress || classifyingHash === d.hash;
+                const classificationBadgeTitle = classificationTooltip || (canReclassify ? "Click to re-run classification" : undefined);
+                const classificationBadgeCommonStyle = { ...styles.docStageBadge, ...classificationBadgeStyle };
                 
                 return (
                   <li key={d.hash || d.stored_name || d.name} style={styles.listItem}>
@@ -1304,12 +1306,29 @@ export default function IngestPage({ systemStatus = {} }) {
                       >
                         {embedBadgeLabel}
                       </span>
-                      <span
-                        style={{ ...styles.docStageBadge, ...classificationBadgeStyle }}
-                        title={classificationTooltip}
-                      >
-                        {classificationLabel}
-                      </span>
+                      {canReclassify ? (
+                        <button
+                          type="button"
+                          style={{
+                            ...classificationBadgeCommonStyle,
+                            cursor: reclassifyDisabled ? "default" : "pointer",
+                            opacity: reclassifyDisabled ? 0.6 : 1,
+                          }}
+                          onClick={() => handleReclassify(d.hash)}
+                          disabled={reclassifyDisabled}
+                          title={classificationBadgeTitle}
+                          aria-label="Re-run document classification"
+                        >
+                          {classificationLabel}
+                        </button>
+                      ) : (
+                        <span
+                          style={classificationBadgeCommonStyle}
+                          title={classificationBadgeTitle}
+                        >
+                          {classificationLabel}
+                        </span>
+                      )}
                     </div>
                     {classificationReady && (
                       <div style={{ ...styles.docMetaRow, marginTop: 4 }}>
@@ -1391,18 +1410,6 @@ export default function IngestPage({ systemStatus = {} }) {
                     {d.error && (<div style={styles.error}>Error: {d.error}</div>)}
                     {classificationError && classificationStatus === "error" && (
                       <div style={styles.error}>Classification error: {classificationError}</div>
-                    )}
-                    {canReclassify && (
-                      <div style={{ ...styles.docActions, justifyContent: "flex-start" }}>
-                        <button
-                          style={{ ...styles.subtleButton, opacity: reclassifyDisabled ? 0.6 : 1 }}
-                          onClick={() => handleReclassify(d.hash)}
-                          disabled={reclassifyDisabled}
-                          title="Re-run LLM document classification"
-                        >
-                          {reclassifyDisabled ? "Classifying…" : "Re-classify"}
-                        </button>
-                      </div>
                     )}
 
                     {showRetry && (
