@@ -706,7 +706,13 @@ export default function IngestPage({ systemStatus = {} }) {
       const res = await fetch(api.classify(hash), { method: "POST" });
       const data = await readJsonSafe(res);
       if (!res.ok) throw new Error((data && (data.detail || data.error || data.raw)) || res.statusText);
-      setUploadStatus(`Classification queued for ${short}`);
+      const jobId = data.job_id;
+      if (jobId) {
+        setActiveJobs(prev => new Set([...prev, jobId]));
+        setUploadStatus(`Classification queued for ${short} • job ${jobId}`);
+      } else {
+        setUploadStatus(`Classification queued for ${short}`);
+      }
       await refreshDocs();
     } catch (e) {
       setUploadStatus(`Classification failed: ${e.message || String(e)}`);
@@ -1244,7 +1250,10 @@ export default function IngestPage({ systemStatus = {} }) {
                   : (classificationError || undefined);
                 const canReclassify = Boolean(d.hash && isCompleted);
                 const reclassifyDisabled = classificationInProgress || classifyingHash === d.hash;
-                const classificationBadgeTitle = classificationTooltip || (canReclassify ? "Click to re-run classification" : undefined);
+                const classificationReclassHint = "Click to re-run classification for this document";
+                const classificationBadgeTitle = canReclassify
+                  ? (classificationTooltip ? `${classificationTooltip}\n\n${classificationReclassHint}` : classificationReclassHint)
+                  : classificationTooltip || undefined;
                 const classificationBadgeCommonStyle = { ...styles.docStageBadge, ...classificationBadgeStyle };
                 
                 return (
