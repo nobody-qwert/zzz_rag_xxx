@@ -70,7 +70,7 @@ const styles = {
     width: "100%",
     border: "none",
     borderRadius: 24,
-    padding: "22px 24px",
+    padding: "10px 10px",
     background: "linear-gradient(145deg, rgba(63, 76, 149, 0.98), rgba(22, 26, 55, 0.95))",
     boxShadow: "0 36px 72px rgba(5, 8, 25, 0.78)",
     display: "flex",
