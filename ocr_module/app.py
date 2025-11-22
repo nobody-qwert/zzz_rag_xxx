@@ -150,6 +150,14 @@ class OCRJob:
 jobs: Dict[str, OCRJob] = {}
 _ocr_loaded = False
 _ocr_lock = asyncio.Lock()
+_ocr_ready_event = asyncio.Event()
+
+
+def _mark_ocr_ready() -> None:
+    global _ocr_loaded
+    _ocr_loaded = True
+    if not _ocr_ready_event.is_set():
+        _ocr_ready_event.set()
 
 
 class ParseResponse(BaseModel):
@@ -181,14 +189,7 @@ async def lifespan(app: FastAPI):
     if MINERU_WARMUP_ON_STARTUP:
         async def _do_warmup() -> None:
             try:
-                info = await asyncio.to_thread(
-                    warmup_mineru,
-                    parse_method=MINERU_PARSE_METHOD,
-                    lang=MINERU_LANG,
-                    table_enable=MINERU_TABLE_ENABLE,
-                    formula_enable=MINERU_FORMULA_ENABLE,
-                    tmp_dir=OCR_WARMUP_DIR,
-                )
+                info = await _load_ocr_models()
                 logger.info("MinerU warmup finished: %s", info)
             except Exception as exc:
                 logger.warning("MinerU warmup failed: %s", exc)
@@ -275,6 +276,10 @@ async def _process_job(job: OCRJob, out_dir: Path) -> None:
         job.set_status("running")
         job.started_at = _utc_now()
         job.update_progress("initializing", 5.0)
+        if not _ocr_loaded:
+            job.update_progress("warming_up", 5.0)
+        await _ensure_ocr_ready()
+        job.update_progress("initializing", 5.0)
         def progress_hook(data: Dict[str, Any]) -> None:
             if not data:
                 return
@@ -340,16 +345,7 @@ async def get_job_result(job_id: str) -> ParseResponse:
 @app.post("/warmup")
 async def warmup_route() -> Dict[str, Any]:
     try:
-        info = await asyncio.to_thread(
-            warmup_mineru,
-            parse_method=MINERU_PARSE_METHOD,
-            lang=MINERU_LANG,
-            table_enable=MINERU_TABLE_ENABLE,
-            formula_enable=MINERU_FORMULA_ENABLE,
-            tmp_dir=OCR_WARMUP_DIR,
-        )
-        global _ocr_loaded
-        _ocr_loaded = True
+        info = await _load_ocr_models()
         return {"warmup_complete": True, **info}
     except Exception as exc:
         logger.exception("MinerU warmup failed")
@@ -357,9 +353,10 @@ async def warmup_route() -> Dict[str, Any]:
 
 
 async def _load_ocr_models() -> Dict[str, Any]:
-    global _ocr_loaded
     async with _ocr_lock:
         if _ocr_loaded:
+            if not _ocr_ready_event.is_set():
+                _ocr_ready_event.set()
             return {"state": "loaded", "already_loaded": True}
         info = await asyncio.to_thread(
             warmup_mineru,
@@ -369,7 +366,7 @@ async def _load_ocr_models() -> Dict[str, Any]:
             formula_enable=MINERU_FORMULA_ENABLE,
             tmp_dir=OCR_WARMUP_DIR,
         )
-        _ocr_loaded = True
+        _mark_ocr_ready()
         return {"state": "loaded", **info}
 
 
@@ -385,6 +382,13 @@ async def control_load() -> Dict[str, Any]:
 @app.get("/control/status")
 async def control_status() -> Dict[str, Any]:
     return {"state": "loaded" if _ocr_loaded else "unloaded"}
+
+
+async def _ensure_ocr_ready() -> None:
+    if _ocr_loaded and _ocr_ready_event.is_set():
+        return
+    await _load_ocr_models()
+    await _ocr_ready_event.wait()
 
 
 if __name__ == "__main__":
