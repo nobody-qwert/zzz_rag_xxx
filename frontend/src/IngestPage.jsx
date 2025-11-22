@@ -1229,7 +1229,7 @@ export default function IngestPage({ systemStatus = {} }) {
                 const classificationReady = classificationStatus === "classified" && classificationInfo;
                 const classificationInProgress = classificationStatus === "running" || classificationStatus === "queued";
                 const classificationLabel = classificationReady
-                  ? `${classificationInfo.l1_name || classificationInfo.l1_id || "Category"}${classificationInfo.l2_name ? ` → ${classificationInfo.l2_name}` : ""}`
+                  ? "CLASSIFICATION READY"
                   : classificationStatus === "error"
                     ? "CLASSIFICATION ERROR"
                     : classificationInProgress
@@ -1244,6 +1244,7 @@ export default function IngestPage({ systemStatus = {} }) {
                   ? [
                       classificationInfo.l1_name || classificationInfo.l1_id,
                       classificationInfo.l2_name ? `→ ${classificationInfo.l2_name}` : "",
+                      classificationInfo.l2_id && !classificationInfo.l2_name ? `→ ${classificationInfo.l2_id}` : "",
                       classificationInfo.l1_confidence ? `L1 confidence: ${classificationInfo.l1_confidence}` : "",
                       classificationInfo.l2_confidence ? `L2 confidence: ${classificationInfo.l2_confidence}` : "",
                     ].filter(Boolean).join("\n") || undefined
