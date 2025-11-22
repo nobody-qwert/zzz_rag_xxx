@@ -73,7 +73,7 @@ const styles = {
   },
   leftColumn: {
     display: "grid",
-    gridTemplateRows: "var(--ingest-upload-height, 300px) minmax(0, 1fr)",
+    gridTemplateRows: "auto minmax(0, 1fr)",
     gap: 18,
     minWidth: 0,
     minHeight: "var(--ingest-left-min-height, calc(100vh - 64px))",
@@ -82,8 +82,8 @@ const styles = {
   uploadCard: {
     display: "flex",
     flexDirection: "column",
-    minHeight: 0,
     overflow: "hidden",
+    gap: 12,
   },
   uploadProgressList: {
     marginTop: 12,
@@ -1017,11 +1017,6 @@ export default function IngestPage({ systemStatus = {} }) {
               Open Chat
             </button>
           </div>
-          <div style={styles.feedback}>
-            {uploadStatus || "PDFs supported. Click to select files and they will ingest immediately."}
-          </div>
-          
-          {/* Upload Progress */}
           {combinedProgressEntries.length > 0 && (
             <div style={styles.uploadProgressList}>
               {combinedProgressEntries.map((p) => {
