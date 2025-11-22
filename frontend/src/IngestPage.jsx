@@ -989,22 +989,32 @@ export default function IngestPage({ systemStatus = {} }) {
       <div className="ingest-layout" style={styles.page}>
       <div style={styles.leftColumn}>
         <section style={{ ...styles.card, ...styles.uploadCard }}>
-          <div style={{ ...styles.row, marginBottom: 12 }}>
-            <input
-              ref={fileInputRef}
-              type="file" 
-              multiple 
-              accept=".pdf,application/pdf"
-              onChange={handleFileInputChange}
-              style={styles.hiddenFileInput}
-            />
+          <div style={{ ...styles.row, marginBottom: 12, justifyContent: "space-between", alignItems: "center", flexWrap: "wrap" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <input
+                ref={fileInputRef}
+                type="file" 
+                multiple 
+                accept=".pdf,application/pdf"
+                onChange={handleFileInputChange}
+                style={styles.hiddenFileInput}
+              />
+              <button
+                type="button"
+                onClick={handleFilePickerClick}
+                disabled={uploading}
+                style={{ ...styles.button, opacity: uploading ? 0.6 : 1 }}
+              >
+                {uploading ? "Uploading…" : "Upload & Ingest"}
+              </button>
+            </div>
             <button
-              type="button"
-              onClick={handleFilePickerClick}
-              disabled={uploading}
-              style={{ ...styles.button, opacity: uploading ? 0.6 : 1 }}
+              onClick={handleOpenChat}
+              disabled={!canOpenChat}
+              style={{ ...styles.button, padding: "11px 24px", opacity: canOpenChat ? 1 : 0.5 }}
+              title={canOpenChat ? "Jump to chat" : chatDisabledReason}
             >
-              {uploading ? "Uploading…" : "Upload & Ingest"}
+              Open Chat
             </button>
           </div>
           <div style={styles.feedback}>
@@ -1226,14 +1236,6 @@ export default function IngestPage({ systemStatus = {} }) {
               style={{ ...styles.subtleButton, opacity: docsLoading ? 0.6 : 1 }}
             >
               {docsLoading ? "Refreshing…" : "Refresh"}
-            </button>
-            <button
-              onClick={handleOpenChat}
-              disabled={!canOpenChat}
-              style={{ ...styles.button, padding: "6px 14px", opacity: canOpenChat ? 1 : 0.5 }}
-              title={canOpenChat ? "Jump to chat" : chatDisabledReason}
-            >
-              Open Chat
             </button>
           </div>
         </div>
