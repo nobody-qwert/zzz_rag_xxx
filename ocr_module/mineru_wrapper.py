@@ -32,6 +32,49 @@ def _env_bool(name: str, default: bool) -> bool:
 _IMAGE_PATTERN = re.compile(r"!\[[^\]]*]\(([^)]+)\)")
 
 
+def _escape_pdf_text(text: str) -> str:
+    return text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def _generate_warmup_pdf_bytes(text: str = "MinerU warmup") -> bytes:
+    """Create a minimal single page PDF for warmup without external deps."""
+    safe_text = _escape_pdf_text(text)
+    stream_body = f"BT\n/F1 24 Tf\n72 720 Td\n({safe_text}) Tj\nET\n"
+    stream_bytes = stream_body.encode("latin-1")
+    object_templates = [
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+        f"<< /Length {len(stream_bytes)} >>\nstream\n{stream_body}endstream",
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    header_bytes = b"%PDF-1.4\n"
+    doc_parts: List[bytes] = [header_bytes]
+    offsets: List[int] = []
+    current = len(header_bytes)
+    for idx, body in enumerate(object_templates, start=1):
+        obj_bytes = f"{idx} 0 obj\n{body}\nendobj\n".encode("latin-1")
+        offsets.append(current)
+        doc_parts.append(obj_bytes)
+        current += len(obj_bytes)
+    xref_entries = [
+        f"xref\n0 {len(object_templates) + 1}\n",
+        "0000000000 65535 f \n",
+    ] + [f"{offset:010d} 00000 n \n" for offset in offsets]
+    startxref = current
+    xref_bytes = "".join(xref_entries).encode("latin-1")
+    trailer_str = (
+        "trailer\n"
+        f"<< /Size {len(object_templates) + 1} /Root 1 0 R >>\n"
+        "startxref\n"
+        f"{startxref}\n"
+        "%%EOF\n"
+    )
+    doc_parts.append(xref_bytes)
+    doc_parts.append(trailer_str.encode("latin-1"))
+    return b"".join(doc_parts)
+
+
 def _coerce_int(value: Any) -> Optional[int]:
     try:
         if isinstance(value, bool):
@@ -372,17 +415,8 @@ def warmup_mineru(*,
             "MINERU_DEVICE_MODE=cuda requested but CUDA not available. Install CUDA torch and run with GPU runtime."
         )
 
-    # Create a tiny single-page PDF in memory using PyMuPDF
-    try:
-        import fitz  # type: ignore
-    except Exception as exc:  # pragma: no cover
-        raise RuntimeError("PyMuPDF required for warmup") from exc
-
-    doc = fitz.open()
-    page = doc.new_page()
-    page.insert_text((72, 72), "MinerU warmup")
-    pdf_bytes = doc.tobytes()
-    doc.close()
+    # Create a tiny single-page PDF in memory without external dependencies
+    pdf_bytes = _generate_warmup_pdf_bytes()
 
     default_base = Path(os.environ.get("INDEX_DIR", "/app_data/runtime")) / "_warmup"
     out_base = Path(tmp_dir) if tmp_dir is not None else default_base
