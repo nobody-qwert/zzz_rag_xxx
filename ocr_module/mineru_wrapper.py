@@ -8,8 +8,6 @@ from pathlib import Path
 import re
 from typing import Any, Callable, Dict, List, Optional
 
-import fitz  # type: ignore
-
 
 @dataclass
 class MineruResult:
@@ -164,22 +162,6 @@ def _extract_images_from_content_list(content_data: Any, *, chunk: str) -> List[
     return deduped
 
 
-def _copy_chunk_images(chunk_images_dir: Path, final_images_dir: Path) -> List[str]:
-    copied: List[str] = []
-    if not chunk_images_dir.exists():
-        return copied
-    final_images_dir.mkdir(parents=True, exist_ok=True)
-    for image_file in chunk_images_dir.iterdir():
-        if not image_file.is_file():
-            continue
-        dest = final_images_dir / image_file.name
-        if not dest.exists():
-            shutil.copy2(image_file, dest)
-        relative_path = f"images/{image_file.name}"
-        copied.append(relative_path)
-    return copied
-
-
 def run_mineru(
     pdf_path: Path,
     out_dir: Path,
@@ -225,6 +207,7 @@ def run_mineru(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     pdf_name = pdf_path.stem
+    pdf_bytes = pdf_path.read_bytes()
 
     # Defaults can be overridden by env or function args
     p_method = (parse_method or os.environ.get("MINERU_PARSE_METHOD") or "auto").strip().lower()
@@ -232,120 +215,92 @@ def run_mineru(
     p_table = table_enable if table_enable is not None else _env_bool("MINERU_TABLE_ENABLE", True)
     p_formula = formula_enable if formula_enable is not None else _env_bool("MINERU_FORMULA_ENABLE", True)
 
-    doc = fitz.open(pdf_path)
-    total_pages = len(doc)
-    if total_pages == 0:
-        raise RuntimeError("PDF contains no pages")
-
-    chunk_pages = max(1, int(os.environ.get("MINERU_PROGRESS_CHUNK_PAGES", "4")))
-    chunk_root = out_dir / "_chunks"
-    chunk_root.mkdir(parents=True, exist_ok=True)
     combined_parts: List[str] = []
-    chunk_records: List[Dict[str, Any]] = []
     all_image_entries: List[Dict[str, Any]] = []
     collected_images: List[str] = []
     collected_content_lists: List[str] = []
 
     final_dir = out_dir / pdf_name / p_method
-    final_dir.mkdir(parents=True, exist_ok=True)
     final_images_dir = final_dir / "images"
     content_list_dir = final_dir / "content_lists"
+    final_dir.parent.mkdir(parents=True, exist_ok=True)
 
-    def emit(stage: str, processed: int) -> None:
+    def emit(stage: str, current: int, total: int) -> None:
         if not progress_cb:
             return
-        total = total_pages
-        percent = max(0.0, min(100.0, (processed / total) * 100.0))
+        total = max(1, total)
+        percent = max(0.0, min(100.0, (current / total) * 100.0))
         progress_cb({
             "stage": stage,
             "percent": percent,
-            "current": processed,
+            "current": current,
             "total": total,
         })
 
-    emit("parsing", 0)
+    emit("parsing", 0, 1)
 
-    for chunk_index, start in enumerate(range(0, total_pages, chunk_pages)):
-        end = min(total_pages, start + chunk_pages)
-        chunk_doc = fitz.open()
-        chunk_doc.insert_pdf(doc, from_page=start, to_page=end - 1)
-        chunk_bytes = chunk_doc.tobytes()
-        chunk_doc.close()
+    do_parse(
+        output_dir=str(out_dir),
+        pdf_file_names=[pdf_name],
+        pdf_bytes_list=[pdf_bytes],
+        p_lang_list=[p_lang],
+        backend="pipeline",
+        parse_method=p_method,
+        formula_enable=p_formula,
+        table_enable=p_table,
+        start_page_id=0,
+        end_page_id=None,
+        f_draw_layout_bbox=False,
+        f_draw_span_bbox=False,
+        f_dump_md=True,
+        f_dump_middle_json=False,
+        f_dump_model_output=False,
+        f_dump_orig_pdf=False,
+        f_dump_content_list=True,
+        device_mode=effective,
+    )
 
-        chunk_name = f"{pdf_name}_part_{chunk_index + 1}"
-        chunk_dir = chunk_root / chunk_name
-        chunk_dir.mkdir(parents=True, exist_ok=True)
+    emit("parsing", 1, 1)
 
-        do_parse(
-            output_dir=str(chunk_dir),
-            pdf_file_names=[chunk_name],
-            pdf_bytes_list=[chunk_bytes],
-            p_lang_list=[p_lang],
-            backend="pipeline",
-            parse_method=p_method,
-            formula_enable=p_formula,
-            table_enable=p_table,
-            start_page_id=0,
-            end_page_id=None,
-            f_draw_layout_bbox=False,
-            f_draw_span_bbox=False,
-            f_dump_md=True,
-            f_dump_middle_json=False,
-            f_dump_model_output=False,
-            f_dump_orig_pdf=False,
-            f_dump_content_list=True,
-            device_mode=effective,
-        )
+    if not final_dir.exists():
+        raise RuntimeError(f"MinerU did not produce expected output directory at {final_dir}")
 
-        chunk_md_path = chunk_dir / chunk_name / p_method / f"{chunk_name}.md"
-        if not chunk_md_path.exists():
-            raise RuntimeError(f"MinerU did not produce expected Markdown at {chunk_md_path}")
-        chunk_markdown = chunk_md_path.read_text(encoding="utf-8")
-        combined_parts.append(chunk_markdown)
+    chunk_markdown_path = final_dir / f"{pdf_name}.md"
+    if not chunk_markdown_path.exists():
+        raise RuntimeError(f"MinerU did not produce expected Markdown at {chunk_markdown_path}")
+    chunk_markdown = chunk_markdown_path.read_text(encoding="utf-8")
+    combined_parts.append(chunk_markdown)
 
-        chunk_content_list_path = chunk_dir / chunk_name / p_method / "content_list.json"
-        chunk_image_dir = chunk_dir / chunk_name / p_method / "images"
+    chunk_content_list_path = final_dir / "content_list.json"
 
-        chunk_image_paths = _copy_chunk_images(chunk_image_dir, final_images_dir)
-        collected_images.extend(chunk_image_paths)
+    if chunk_content_list_path.exists():
+        content_list_dir.mkdir(parents=True, exist_ok=True)
+        copied_list_path = content_list_dir / f"{pdf_name}.json"
+        shutil.copy2(chunk_content_list_path, copied_list_path)
+        collected_content_lists.append(f"content_lists/{copied_list_path.name}")
+        try:
+            loaded_content = json.loads(chunk_content_list_path.read_text(encoding="utf-8"))
+            images_from_content = _extract_images_from_content_list(loaded_content, chunk=pdf_name)
+            all_image_entries.extend(images_from_content)
+        except Exception:
+            pass
+    else:
+        markdown_images = _extract_images_from_markdown(chunk_markdown, chunk=pdf_name)
+        all_image_entries.extend(markdown_images)
 
-        chunk_content_entry: Optional[Path] = None
-        if chunk_content_list_path.exists():
-            content_list_dir.mkdir(parents=True, exist_ok=True)
-            chunk_content_entry = content_list_dir / f"{chunk_name}.json"
-            shutil.copy2(chunk_content_list_path, chunk_content_entry)
-            collected_content_lists.append(f"content_lists/{chunk_content_entry.name}")
-            try:
-                loaded_content = json.loads(chunk_content_list_path.read_text(encoding="utf-8"))
-                images_from_content = _extract_images_from_content_list(loaded_content, chunk=chunk_name)
-                all_image_entries.extend(images_from_content)
-            except Exception:
-                pass
-        else:
-            markdown_images = _extract_images_from_markdown(chunk_markdown, chunk=chunk_name)
-            all_image_entries.extend(markdown_images)
-
-        chunk_records.append(
-            {
-                "chunk": chunk_name,
-                "page_start": start + 1,
-                "page_end": end,
-                "content_list": f"content_lists/{chunk_content_entry.name}" if chunk_content_entry else None,
-                "images_copied": len(chunk_image_paths),
-            }
-        )
-
-        emit("parsing", end)
-        shutil.rmtree(chunk_dir, ignore_errors=True)
-
-    doc.close()
+    if final_images_dir.exists():
+        collected_images = [
+            f"images/{image_file.name}"
+            for image_file in sorted(final_images_dir.iterdir())
+            if image_file.is_file()
+        ]
 
     md_path = final_dir / f"{pdf_name}.md"
     text = "\n\n".join(part.strip() for part in combined_parts if part.strip())
     if not text:
         raise RuntimeError("MinerU produced no text output")
     md_path.write_text(text, encoding="utf-8")
-    shutil.rmtree(chunk_root, ignore_errors=True)
+
     meta = {
         "markdown_path": str(md_path),
         "device_mode": effective,
@@ -354,8 +309,6 @@ def run_mineru(
         "lang": p_lang,
         "table_enable": p_table,
         "formula_enable": p_formula,
-        "pages": total_pages,
-        "chunk_pages": chunk_pages,
         "chunks": len(combined_parts),
         "assets": {
             "base_dir": str(final_dir),
@@ -364,7 +317,6 @@ def run_mineru(
             "content_lists": collected_content_lists,
         },
         "image_blocks": all_image_entries,
-        "chunk_records": chunk_records,
     }
 
     # Write a small summary for debugging

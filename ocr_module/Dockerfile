@@ -17,7 +17,6 @@ RUN uv pip install --system --index-url https://download.pytorch.org/whl/cu124 \
 RUN uv pip install --system \
     fastapi\>=0.110 \
     uvicorn[standard]\>=0.29 \
-    PyMuPDF\>=1.24.0 \
     mineru\>=2.5.4 \
     python-multipart\>=0.0.9 \
     doclayout-yolo\>=0.0.4 \
