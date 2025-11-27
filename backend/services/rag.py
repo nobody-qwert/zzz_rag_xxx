@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Mapping, Tuple
 from uuid import uuid4
 
 import numpy as np
@@ -13,29 +13,29 @@ try:
     from ..embeddings import EmbeddingClient
     from ..schemas import AskRequest, AskResponse
     from ..token_utils import estimate_messages_tokens, estimate_tokens, truncate_text_to_tokens
-    from ..dependencies import document_store, settings, gpu_phase_manager
+    from ..dependencies import document_store, settings, gpu_phase_manager, embedding_cache
     from ..utils.conversation import (
         build_distilled_query,
         render_context,
         summarize_history,
         trim_history_for_budget,
     )
-    from ..utils.vectors import cosine_similarity
 except ImportError:  # pragma: no cover
     from embeddings import EmbeddingClient  # type: ignore
     from schemas import AskRequest, AskResponse  # type: ignore
     from token_utils import estimate_messages_tokens, estimate_tokens, truncate_text_to_tokens  # type: ignore
-    from dependencies import document_store, settings, gpu_phase_manager  # type: ignore
+    from dependencies import document_store, settings, gpu_phase_manager, embedding_cache  # type: ignore
     from utils.conversation import (  # type: ignore
         build_distilled_query,
         render_context,
         summarize_history,
         trim_history_for_budget,
     )
-    from utils.vectors import cosine_similarity  # type: ignore
 
 
 logger = logging.getLogger(__name__)
+_VECTOR_MIN_CANDIDATES = 50
+_VECTOR_CANDIDATE_MULTIPLIER = 5
 
 
 async def _prepare_question_payload(
@@ -172,48 +172,9 @@ async def _prepare_question_payload(
                 logger.warning("HyDE vector blend failed: %s", exc)
                 query_vec = distilled_vec
 
-    parser_specs: List[Dict[str, str]] = [
-        {"config_id": settings.chunk_config_small_id, "scale": "small"}
-    ]
-    if (
-        settings.chunk_config_large_id
-        and settings.chunk_config_large_id != settings.chunk_config_small_id
-    ):
-        parser_specs.append({"config_id": settings.chunk_config_large_id, "scale": "large"})
-
-    chunks: List[Dict[str, Any]] = []
-    for spec in parser_specs:
-        config_id = spec["config_id"]
-        scale = spec["scale"]
-        parser_chunks = await document_store.fetch_chunks(chunk_config_id=config_id)
-        for chunk in parser_chunks:
-            chunk_copy = dict(chunk)
-            chunk_copy["chunk_config_id"] = config_id
-            chunk_copy["scale"] = scale
-            chunks.append(chunk_copy)
-
-    chunk_ids = [chunk["chunk_id"] for chunk in chunks]
-    emb_rows = await document_store.fetch_embeddings_for_chunks(chunk_ids)
-    emb_by_id = {row.chunk_id: row for row in emb_rows}
-
-    docs = await document_store.list_documents()
-    docs_by_hash = {doc["doc_hash"]: doc for doc in docs}
-
-    chunks_per_doc: Dict[str, int] = {}
-    for chunk in chunks:
-        doc_hash = chunk["doc_hash"]
-        chunks_per_doc[doc_hash] = chunks_per_doc.get(doc_hash, 0) + 1
-
-    scored: List[Dict[str, Any]] = []
     retrieval_start = time.perf_counter()
     await _emit_step("started", "Vector search", "retrieval", order=step_counter)
-    for chunk in chunks:
-        row = emb_by_id.get(chunk["chunk_id"])  # type: ignore[arg-type]
-        if not row:
-            continue
-        score = cosine_similarity(row.vector, query_vec)
-        scored.append({"chunk": chunk, "score": score})
-    scored.sort(key=lambda entry: entry["score"], reverse=True)
+    scored, chunk_counts = await _score_chunks_with_cache(query_vec, req.top_k)
     _record_step("Vector search", "retrieval", retrieval_start)
     await _emit_step(
         "done",
@@ -226,9 +187,13 @@ async def _prepare_question_payload(
         },
     )
 
+    chunks_per_doc = dict(chunk_counts)
     top_k = max(1, min(req.top_k, 20))
     filtered_sections = [entry for entry in scored if entry["score"] >= settings.min_context_similarity]
     context_sections = filtered_sections[:top_k]
+
+    docs = await document_store.list_documents()
+    docs_by_hash = {doc["doc_hash"]: doc for doc in docs}
 
     if not settings.llm_base_url or not settings.llm_api_key:
         raise HTTPException(
@@ -637,47 +602,17 @@ async def stream_question(req: AskRequest):
                 query_vec = distilled_vec
 
             # Step 4: vector search
-            parser_specs: List[Dict[str, str]] = [{"config_id": settings.chunk_config_small_id, "scale": "small"}]
-            if settings.chunk_config_large_id and settings.chunk_config_large_id != settings.chunk_config_small_id:
-                parser_specs.append({"config_id": settings.chunk_config_large_id, "scale": "large"})
-
-            chunks: List[Dict[str, Any]] = []
-            for spec in parser_specs:
-                config_id = spec["config_id"]
-                scale = spec["scale"]
-                parser_chunks = await document_store.fetch_chunks(chunk_config_id=config_id)
-                for chunk in parser_chunks:
-                    chunk_copy = dict(chunk)
-                    chunk_copy["chunk_config_id"] = config_id
-                    chunk_copy["scale"] = scale
-                    chunks.append(chunk_copy)
-
-            chunk_ids = [chunk["chunk_id"] for chunk in chunks]
-            emb_rows = await document_store.fetch_embeddings_for_chunks(chunk_ids)
-            emb_by_id = {row.chunk_id: row for row in emb_rows}
-
-            docs = await document_store.list_documents()
-            docs_by_hash = {doc["doc_hash"]: doc for doc in docs}
-
-            chunks_per_doc: Dict[str, int] = {}
-            for chunk in chunks:
-                doc_hash = chunk["doc_hash"]
-                chunks_per_doc[doc_hash] = chunks_per_doc.get(doc_hash, 0) + 1
-
-            scored: List[Dict[str, Any]] = []
             retrieval_start = time.perf_counter()
             yield _json_line({"type": "step", "step": {"name": "Vector search", "kind": "retrieval", "order": order, "state": "started"}})
-            for chunk in chunks:
-                row = emb_by_id.get(chunk["chunk_id"])  # type: ignore[arg-type]
-                if not row:
-                    continue
-                score = cosine_similarity(row.vector, query_vec)
-                scored.append({"chunk": chunk, "score": score})
-            scored.sort(key=lambda entry: entry["score"], reverse=True)
+            scored, chunk_counts = await _score_chunks_with_cache(query_vec, req.top_k)
             duration = max(0.0, time.perf_counter() - retrieval_start)
             steps.append({"name": "Vector search", "kind": "retrieval", "duration_seconds": duration, "order": order, "retrieved": len(scored)})
             yield _json_line({"type": "step", "step": {**steps[-1], "state": "done"}})
             order += 1
+
+            chunks_per_doc = dict(chunk_counts)
+            docs = await document_store.list_documents()
+            docs_by_hash = {doc["doc_hash"]: doc for doc in docs}
 
             top_k = max(1, min(req.top_k, 20))
             filtered_sections = [entry for entry in scored if entry["score"] >= settings.min_context_similarity]
@@ -861,6 +796,68 @@ async def stream_question(req: AskRequest):
             yield _json_line({"type": "error", "error": str(exc)})
 
     return _event_stream()
+
+
+async def _score_chunks_with_cache(
+    query_vec: np.ndarray,
+    requested_top_k: int,
+) -> Tuple[List[Dict[str, Any]], Mapping[str, int]]:
+    snapshot = embedding_cache.snapshot()
+    if snapshot.total == 0:
+        return [], snapshot.chunks_per_doc
+    vector = np.asarray(query_vec, dtype=np.float32).reshape(-1)
+    if snapshot.dim and vector.shape[0] != snapshot.dim:
+        raise HTTPException(status_code=500, detail="Embedding dimension mismatch; please re-ingest documents")
+    norm = np.linalg.norm(vector)
+    if norm <= 0:
+        return [], snapshot.chunks_per_doc
+    normalized_query = vector / max(norm, 1e-8)
+    scores = snapshot.matrix @ normalized_query
+    candidate_goal = max(requested_top_k * _VECTOR_CANDIDATE_MULTIPLIER, _VECTOR_MIN_CANDIDATES)
+    candidate_count = min(snapshot.total, candidate_goal)
+    if candidate_count <= 0:
+        return [], snapshot.chunks_per_doc
+    top_indices = _select_top_indices(scores, candidate_count)
+    candidate_ids = [snapshot.chunk_ids[idx] for idx in top_indices]
+    candidate_scores = [float(scores[idx]) for idx in top_indices]
+    if not candidate_ids:
+        return [], snapshot.chunks_per_doc
+    chunk_rows = await document_store.fetch_chunks_by_ids(candidate_ids)
+    chunk_by_id = {row["chunk_id"]: row for row in chunk_rows}
+    scored: List[Dict[str, Any]] = []
+    for chunk_id, score_value in zip(candidate_ids, candidate_scores):
+        chunk_row = chunk_by_id.get(chunk_id)
+        if not chunk_row:
+            continue
+        chunk_copy = dict(chunk_row)
+        config_id_raw = chunk_copy.get("chunk_config_id")
+        config_id = str(config_id_raw) if config_id_raw is not None else None
+        chunk_copy["scale"] = _scale_for_chunk_config(config_id)
+        scored.append({"chunk": chunk_copy, "score": score_value})
+    return scored, snapshot.chunks_per_doc
+
+
+def _select_top_indices(scores: np.ndarray, count: int) -> np.ndarray:
+    if count <= 0:
+        return np.empty(0, dtype=np.int64)
+    if scores.ndim != 1:
+        scores = scores.reshape(-1)
+    total = scores.shape[0]
+    if count >= total:
+        return np.argsort(scores)[::-1]
+    top_idx = np.argpartition(scores, -count)[-count:]
+    return top_idx[np.argsort(scores[top_idx])[::-1]]
+
+
+def _scale_for_chunk_config(config_id: Optional[str]) -> Optional[str]:
+    if not config_id:
+        return None
+    if config_id == settings.chunk_config_small_id:
+        return "small"
+    large_id = settings.chunk_config_large_id
+    if large_id and large_id != settings.chunk_config_small_id and config_id == large_id:
+        return "large"
+    return None
 
 
 def _build_sources(

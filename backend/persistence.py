@@ -493,6 +493,19 @@ class DocumentStore:
         finally:
             await conn.close()
 
+    async def fetch_chunks_by_ids(self, chunk_ids: Sequence[str]) -> List[Dict[str, Any]]:
+        if not chunk_ids:
+            return []
+        conn = await self._conn()
+        try:
+            placeholders = ",".join("?" for _ in chunk_ids)
+            cur = await conn.execute(f"SELECT * FROM chunks WHERE chunk_id IN ({placeholders})", tuple(chunk_ids))
+            rows = await cur.fetchall()
+            await cur.close()
+            return [dict(r) for r in rows]
+        finally:
+            await conn.close()
+
     # Embeddings
     @staticmethod
     def _pack_vector(v: np.ndarray) -> bytes:
@@ -540,6 +553,28 @@ class DocumentStore:
             out: List[EmbeddingRow] = []
             for r in rows:
                 dim = int(r["dim"])  # type: ignore
+                out.append(
+                    EmbeddingRow(
+                        chunk_id=r["chunk_id"],
+                        doc_hash=r["doc_hash"],
+                        dim=dim,
+                        model=r["model"],
+                        vector=self._unpack_vector(r["vector"], dim),
+                    )
+                )
+            return out
+        finally:
+            await conn.close()
+
+    async def fetch_all_embeddings(self) -> List[EmbeddingRow]:
+        conn = await self._conn()
+        try:
+            cur = await conn.execute("SELECT chunk_id, doc_hash, dim, model, vector FROM embeddings")
+            rows = await cur.fetchall()
+            await cur.close()
+            out: List[EmbeddingRow] = []
+            for r in rows:
+                dim = int(r["dim"])  # type: ignore[index]
                 out.append(
                     EmbeddingRow(
                         chunk_id=r["chunk_id"],

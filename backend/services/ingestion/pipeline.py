@@ -14,7 +14,7 @@ except ImportError:  # pragma: no cover
     from embeddings import EmbeddingClient  # type: ignore
     from persistence import EmbeddingRow  # type: ignore
 
-from .context import document_store, settings
+from .context import document_store, settings, embedding_cache
 
 logger = logging.getLogger(__name__)
 
@@ -172,7 +172,9 @@ async def persist_chunk_and_embedding_results(
 ) -> None:
     await document_store.replace_chunks(doc_hash, settings.chunk_config_small_id, list(small_chunk_rows))
     await document_store.replace_chunks(doc_hash, settings.chunk_config_large_id, list(large_chunk_rows))
-    await document_store.replace_embeddings(list(embeddings))
+    embedding_rows = list(embeddings)
+    await document_store.replace_embeddings(embedding_rows)
+    await embedding_cache.replace_document(doc_hash, embedding_rows)
 
     prev_metrics = await document_store.get_performance_metrics(doc_hash)
     ocr_time_val = ocr_time

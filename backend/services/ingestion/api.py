@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from fastapi import HTTPException, UploadFile
 
-from .context import document_store, jobs_registry, settings
+from .context import document_store, jobs_registry, settings, embedding_cache
 from .models import QueuedBatchDoc
 from .ocr import warmup_mineru as warmup_mineru_call
 from .uploads import prepare_upload
@@ -103,6 +103,8 @@ async def delete_document(doc_hash: str) -> Dict[str, Any]:
             logging.warning("Failed to delete stored file %s: %s", file_path, exc)
 
     deleted = await document_store.delete_document(doc_hash)
+    if deleted:
+        await embedding_cache.remove_document(doc_hash)
     removed_jobs: List[str] = []
     for jid, info in list(jobs_registry.items()):
         docs = info.get("docs") or []
