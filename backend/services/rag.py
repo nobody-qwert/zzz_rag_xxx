@@ -860,9 +860,6 @@ def _scale_for_chunk_config(config_id: Optional[str]) -> Optional[str]:
         return None
     if config_id == settings.chunk_config_small_id:
         return "small"
-    large_id = settings.chunk_config_large_id
-    if large_id and large_id != settings.chunk_config_small_id and config_id == large_id:
-        return "large"
     return None
 
 

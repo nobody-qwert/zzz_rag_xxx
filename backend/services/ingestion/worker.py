@@ -513,8 +513,7 @@ async def _run_postprocess_phase(
                 100.0,
                 stage="done",
                 embeddings=result["total_embeddings"],
-                small_embeddings=result["small_chunks"],
-                large_embeddings=result["large_chunks"],
+                chunk_embeddings=result.get("chunk_count", result.get("total_chunks", result["total_embeddings"])),
             )
         except Exception as exc:
             error_msg = str(exc)

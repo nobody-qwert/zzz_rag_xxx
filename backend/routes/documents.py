@@ -51,7 +51,6 @@ async def list_documents() -> List[Dict[str, Any]]:
         ocr_available = False
         ocr_created_at: Optional[str] = None
         small_embeddings = 0
-        large_embeddings = 0
         total_embeddings = 0
 
         if doc_hash:
@@ -62,7 +61,6 @@ async def list_documents() -> List[Dict[str, Any]]:
 
             embedding_counts = await document_store.count_embeddings_by_config(doc_hash)
             small_embeddings = int(embedding_counts.get(settings.chunk_config_small_id, 0))
-            large_embeddings = int(embedding_counts.get(settings.chunk_config_large_id, 0))
             total_embeddings = int(sum(embedding_counts.values()))
 
         classification = None
@@ -72,7 +70,6 @@ async def list_documents() -> List[Dict[str, Any]]:
         doc_data["ocr_available"] = ocr_available
         doc_data["ocr_extracted_at"] = ocr_created_at
         doc_data["small_embeddings"] = small_embeddings
-        doc_data["large_embeddings"] = large_embeddings
         doc_data["total_embeddings"] = total_embeddings
         doc_data["embedding_available"] = total_embeddings > 0
         doc_data["classification"] = classification
@@ -115,8 +112,7 @@ async def debug_parsed_text(
     total_tokens = count_text_tokens(text)
     embedding_counts = await document_store.count_embeddings_by_config(doc_hash)
     small_embeddings = int(embedding_counts.get(settings.chunk_config_small_id, 0))
-    large_embeddings = int(embedding_counts.get(settings.chunk_config_large_id, 0))
-    total_embeddings = small_embeddings + large_embeddings
+    total_embeddings = small_embeddings
 
     text_length = len(text)
     unlimited_preview = max_chars is None or max_chars <= 0
@@ -148,7 +144,6 @@ async def debug_parsed_text(
         "chunk_count": total_embeddings,
         "total_embeddings": total_embeddings,
         "small_embeddings": small_embeddings,
-        "large_embeddings": large_embeddings,
         "assets": assets_payload,
         "image_blocks": meta.get("image_blocks") if isinstance(meta, dict) else None,
     }

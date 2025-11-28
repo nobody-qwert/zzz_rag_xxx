@@ -28,13 +28,6 @@ def build_chunk_specs() -> List[ChunkWindowSpec]:
             right_padding=settings.chunk_overlap,
             step_size=settings.chunk_size,
         ),
-        ChunkWindowSpec(
-            name="large",
-            core_size=settings.large_chunk_size,
-            left_padding=settings.large_chunk_left_overlap,
-            right_padding=settings.large_chunk_right_overlap,
-            step_size=settings.large_chunk_size,
-        ),
     ]
 
 
@@ -43,9 +36,14 @@ def run_chunking(
     chunk_specs: Sequence[ChunkWindowSpec],
     *,
     progress_cb: Optional[Callable[[Dict[str, Any]], None]] = None,
-) -> Tuple[List[Any], List[Any]]:
+) -> List[Any]:
     chunk_views = chunk_text_multi(text, chunk_specs, progress_cb=progress_cb)
-    return chunk_views.get("small", []), chunk_views.get("large", [])
+    ordered_specs = list(chunk_specs)
+    spec_names = [spec.name for spec in ordered_specs] if ordered_specs else list(chunk_views.keys())
+    combined: List[Any] = []
+    for name in spec_names:
+        combined.extend(chunk_views.get(name, []))
+    return combined
 
 
 async def compute_embeddings_for_chunks(
@@ -109,7 +107,6 @@ async def process_document_text(
     on_embedding_start: Optional[Callable[[], None]] = None,
 ) -> Tuple[
     List[Tuple[str, int, str, int]],
-    List[Tuple[str, int, str, int]],
     List[EmbeddingRow],
     float,
     float,
@@ -128,8 +125,8 @@ async def process_document_text(
         return f"{doc_hash}-{raw_id}"
 
     start_chunking = time.perf_counter()
-    small_chunks, large_chunks = run_chunking(ocr_text, specs, progress_cb=chunk_progress_cb)
-    if not small_chunks and not large_chunks:
+    chunks = run_chunking(ocr_text, specs, progress_cb=chunk_progress_cb)
+    if not chunks:
         raise RuntimeError("Chunking produced no chunks; check chunking settings")
 
     def _rows_for(chunks: Sequence[Any]) -> List[Tuple[str, int, str, int]]:
@@ -139,8 +136,7 @@ async def process_document_text(
             rows.append((scoped_id, chunk.order_index, chunk.text, chunk.token_count))
         return rows
 
-    small_chunk_rows = _rows_for(small_chunks)
-    large_chunk_rows = _rows_for(large_chunks)
+    chunk_rows = _rows_for(chunks)
     chunking_time = time.perf_counter() - start_chunking
 
     if on_embedding_start:
@@ -150,28 +146,26 @@ async def process_document_text(
     rows = await compute_embeddings_for_chunks(
         [
             {"chunk_id": cid, "order_index": idx, "text": txt, "token_count": tok}
-            for (cid, idx, txt, tok) in (small_chunk_rows + large_chunk_rows)
+            for (cid, idx, txt, tok) in chunk_rows
         ],
         emb_client,
         doc_hash,
         progress_cb=embedding_progress_cb,
     )
     embedding_time = time.perf_counter() - start_embedding
-    return small_chunk_rows, large_chunk_rows, rows, chunking_time, embedding_time
+    return chunk_rows, rows, chunking_time, embedding_time
 
 
 async def persist_chunk_and_embedding_results(
     *,
     doc_hash: str,
-    small_chunk_rows: Sequence[Tuple[str, int, str, int]],
-    large_chunk_rows: Sequence[Tuple[str, int, str, int]],
+    chunk_rows: Sequence[Tuple[str, int, str, int]],
     embeddings: Sequence[EmbeddingRow],
     chunking_time: float,
     embedding_time: float,
     ocr_time: Optional[float] = None,
 ) -> None:
-    await document_store.replace_chunks(doc_hash, settings.chunk_config_small_id, list(small_chunk_rows))
-    await document_store.replace_chunks(doc_hash, settings.chunk_config_large_id, list(large_chunk_rows))
+    await document_store.replace_chunks(doc_hash, settings.chunk_config_small_id, list(chunk_rows))
     embedding_rows = list(embeddings)
     await document_store.replace_embeddings(embedding_rows)
     await embedding_cache.replace_document(doc_hash, embedding_rows)
@@ -214,7 +208,7 @@ async def run_postprocess_pipeline(
 ) -> Dict[str, Any]:
     if on_chunk_start:
         on_chunk_start()
-    small_chunk_rows, large_chunk_rows, rows, chunking_time, embedding_time = await process_document_text(
+    chunk_rows, rows, chunking_time, embedding_time = await process_document_text(
         doc_hash,
         ocr_text,
         emb_client=emb_client,
@@ -225,18 +219,18 @@ async def run_postprocess_pipeline(
     )
     await persist_chunk_and_embedding_results(
         doc_hash=doc_hash,
-        small_chunk_rows=small_chunk_rows,
-        large_chunk_rows=large_chunk_rows,
+        chunk_rows=chunk_rows,
         embeddings=rows,
         chunking_time=chunking_time,
         embedding_time=embedding_time,
         ocr_time=ocr_time,
     )
+    chunk_count = len(chunk_rows)
+    embedding_count = len(rows)
     return {
-        "small_chunks": len(small_chunk_rows),
-        "large_chunks": len(large_chunk_rows),
-        "total_chunks": len(small_chunk_rows) + len(large_chunk_rows),
-        "total_embeddings": len(rows),
+        "chunk_count": chunk_count,
+        "total_chunks": chunk_count,
+        "total_embeddings": embedding_count,
         "chunking_time_sec": chunking_time,
         "embedding_time_sec": embedding_time,
     }

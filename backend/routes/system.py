@@ -47,16 +47,9 @@ def _settings_snapshot() -> Dict[str, Dict[str, Any]]:
         "chunking": {
             "chunk_size": settings.chunk_size,
             "chunk_overlap": settings.chunk_overlap,
-            "large_chunk_size": settings.large_chunk_size,
-            "large_chunk_left_overlap": settings.large_chunk_left_overlap,
-            "large_chunk_right_overlap": settings.large_chunk_right_overlap,
             "chunk_config_small_id": settings.chunk_config_small_id,
-            "chunk_config_large_id": settings.chunk_config_large_id,
-            "small": _format_chunk_config(
+            "window": _format_chunk_config(
                 _get_chunk_config(settings.chunk_config_small_id) or settings.chunking_configs[0]
-            ),
-            "large": _format_chunk_config(
-                _get_chunk_config(settings.chunk_config_large_id) or settings.chunking_configs[-1]
             ),
         },
         "embedding": {

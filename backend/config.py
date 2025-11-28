@@ -36,11 +36,7 @@ class AppSettings:
     frontend_origin: str
     chunk_size: int
     chunk_overlap: int
-    large_chunk_size: int
-    large_chunk_left_overlap: int
-    large_chunk_right_overlap: int
     chunk_config_small_id: str
-    chunk_config_large_id: str
     chunking_configs: Tuple[ChunkingConfigSpec, ...]
     llm_base_url: str
     llm_api_key: str
@@ -89,9 +85,6 @@ def load_settings() -> AppSettings:
     ocr_parser_key = _str_env("OCR_PARSER_KEY", "mineru").lower()
     chunk_size = _int_env("CHUNK_SIZE", "200")
     chunk_overlap = _int_env("CHUNK_OVERLAP", "60")
-    large_chunk_size = _int_env("LARGE_CHUNK_SIZE", "1600")
-    large_chunk_left_overlap = _int_env("LARGE_CHUNK_LEFT_OVERLAP", "100")
-    large_chunk_right_overlap = _int_env("LARGE_CHUNK_RIGHT_OVERLAP", "100")
     ocr_status_poll_interval = _float_env("OCR_STATUS_POLL_INTERVAL", "5")
 
     chunking_configs: Tuple[ChunkingConfigSpec, ...] = (
@@ -104,21 +97,12 @@ def load_settings() -> AppSettings:
             right_overlap=chunk_overlap,
             step_size=chunk_size,
         ),
-        ChunkingConfigSpec(
-            config_id="chunk-large",
-            label="Large window",
-            description="Secondary large context window",
-            core_size=large_chunk_size,
-            left_overlap=large_chunk_left_overlap,
-            right_overlap=large_chunk_right_overlap,
-            step_size=large_chunk_size,
-        ),
     )
 
     ocr_module_url = _str_env("OCR_MODULE_URL", "http://ocr-module:8000").rstrip("/")
     llm_control_url = _str_env("LLM_CONTROL_URL")
     if not llm_control_url:
-        llm_endpoint = (os.environ.get("LLM_ENDPOINT") or "llm_small").strip() or "llm_small"
+        llm_endpoint = (os.environ.get("LLM_ENDPOINT") or "llm_big").strip() or "llm_big"
         llm_control_url = f"http://{llm_endpoint}:9000/control"
     ocr_control_url = _str_env("OCR_CONTROL_URL", f"{ocr_module_url}/control")
 
@@ -149,11 +133,7 @@ def load_settings() -> AppSettings:
         frontend_origin=f"http://localhost:{os.environ.get('FRONTEND_PORT', '5173')}",
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
-        large_chunk_size=large_chunk_size,
-        large_chunk_left_overlap=large_chunk_left_overlap,
-        large_chunk_right_overlap=large_chunk_right_overlap,
         chunk_config_small_id="chunk-small",
-        chunk_config_large_id="chunk-large",
         chunking_configs=chunking_configs,
         llm_base_url=_str_env("LLM_BASE_URL"),
         llm_api_key=_str_env("LLM_API_KEY"),

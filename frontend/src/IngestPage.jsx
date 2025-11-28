@@ -851,12 +851,9 @@ export default function IngestPage({ systemStatus = {} }) {
       if (!res.ok) {
         throw new Error((data && (data.detail || data.error || data.raw)) || `GET preview ${res.status}`);
       }
-      const totalEmbeddings = Number(data.total_embeddings ?? data.chunk_count ?? 0) || 0;
+      const totalEmbeddings = Number(data.total_embeddings ?? data.chunk_count ?? data.small_embeddings ?? 0) || 0;
       const hasSmall = typeof data.small_embeddings === "number";
-      const hasLarge = typeof data.large_embeddings === "number";
       const smallEmbeddings = hasSmall ? Number(data.small_embeddings) : totalEmbeddings;
-      const inferredLarge = Math.max(0, totalEmbeddings - smallEmbeddings);
-      const largeEmbeddings = hasLarge ? Number(data.large_embeddings) : inferredLarge;
       setPreview(typeof data.preview === "string" ? data.preview : "");
       setPreviewInfo({
         document_name: data.document_name,
@@ -866,7 +863,6 @@ export default function IngestPage({ systemStatus = {} }) {
         chunk_count: data.chunk_count,
         total_embeddings: totalEmbeddings,
         small_embeddings: smallEmbeddings,
-        large_embeddings: largeEmbeddings,
         preview_chars: data.preview_chars,
         truncated: !!data.truncated,
         parser,
@@ -1113,7 +1109,6 @@ export default function IngestPage({ systemStatus = {} }) {
                       <span style={styles.previewStatsItem}>
                         <span style={styles.previewStatsLabel}>Embeddings:</span>
                         {Number(previewInfo.total_embeddings || previewInfo.chunk_count || 0).toLocaleString()}
-                        {` (Small ${Number(previewInfo.small_embeddings || 0).toLocaleString()} • Large ${Number(previewInfo.large_embeddings || 0).toLocaleString()})`}
                       </span>
                       {hasSelectedDoc && (
                         <span style={{ ...styles.previewStatsItem, display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -1265,8 +1260,7 @@ export default function IngestPage({ systemStatus = {} }) {
                 const ocrAvailable = Boolean(d.ocr_available);
                 const embeddingsAvailable = Boolean(d.embedding_available);
                 const totalEmbeddings = Number(d.total_embeddings ?? 0) || 0;
-                const smallEmbeddings = Number(d.small_embeddings ?? 0) || 0;
-                const largeEmbeddings = Number(d.large_embeddings ?? Math.max(0, totalEmbeddings - smallEmbeddings)) || 0;
+                const smallEmbeddings = Number(d.small_embeddings ?? totalEmbeddings) || 0;
                 const ocrBadgeLabel = ocrAvailable ? "OCR READY" : isErrored ? "OCR ERROR" : "OCR PENDING";
                 const embedBadgeLabel = embeddingsAvailable
                   ? `EMBED READY${totalEmbeddings ? ` (${totalEmbeddings})` : ""}`
@@ -1376,7 +1370,7 @@ export default function IngestPage({ systemStatus = {} }) {
                         style={{ ...styles.docStageBadge, ...embedBadgeStyle }}
                         title={
                           embeddingsAvailable
-                            ? `Small: ${smallEmbeddings.toLocaleString()} | Large: ${largeEmbeddings.toLocaleString()}`
+                            ? `Chunks: ${smallEmbeddings.toLocaleString()}`
                             : undefined
                         }
                       >
