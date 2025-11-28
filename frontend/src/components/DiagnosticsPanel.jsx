@@ -68,9 +68,12 @@ export default function DiagnosticsPanel({ open, onToggle, groups, gpu, gpuError
         <>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {gpuList.map((gpuInfo) => {
-              const used = gpuInfo.memory_used_mb || 0;
-              const total = gpuInfo.memory_total_mb || 0;
+              const used = Number(gpuInfo.memory_used_mb) || 0;
+              const total = Number(gpuInfo.memory_total_mb) || 0;
               const percent = clampPercent(total > 0 ? (used / total) * 100 : 0);
+              const gpuUtilValue = Number(gpuInfo.utilization_gpu);
+              const gpuUtilPercent = Number.isFinite(gpuUtilValue) ? clampPercent(gpuUtilValue) : 0;
+              const gpuUtilDisplay = Number.isFinite(gpuUtilValue) ? `${gpuUtilValue.toFixed(0)}%` : "—";
               return (
                 <div key={`${gpuInfo.uuid}-${gpuInfo.index}`} style={{ background: "rgba(15, 23, 42, 0.75)", borderRadius: 12, padding: "10px 12px", boxShadow: "0 1px 0 rgba(148, 163, 184, 0.15)" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 6 }}>
@@ -81,9 +84,15 @@ export default function DiagnosticsPanel({ open, onToggle, groups, gpu, gpuError
                   <div style={{ height: 6, borderRadius: 999, background: "rgba(148, 163, 184, 0.2)", overflow: "hidden", marginBottom: 6 }}>
                     <div style={{ width: `${percent}%`, height: "100%", background: "linear-gradient(90deg, rgba(14,165,233,0.9), rgba(79,70,229,0.9))" }} />
                   </div>
-                  <div style={{ display: "flex", fontSize: 11, opacity: 0.8, justifyContent: "space-between" }}>
-                    <span>GPU {gpuInfo.utilization_gpu ?? "—"}%</span>
-                    <span>Mem {gpuInfo.utilization_memory ?? "—"}%</span>
+                  <div style={{ fontSize: 12, marginBottom: 6 }}>GPU Usage {gpuUtilDisplay}</div>
+                  <div style={{ height: 6, borderRadius: 999, background: "rgba(148, 163, 184, 0.2)", overflow: "hidden", marginBottom: 6 }}>
+                    <div
+                      style={{
+                        width: Number.isFinite(gpuUtilValue) ? `${gpuUtilPercent}%` : 0,
+                        height: "100%",
+                        background: "linear-gradient(90deg, rgba(249,115,22,0.9), rgba(236,72,153,0.9))",
+                      }}
+                    />
                   </div>
                 </div>
               );
