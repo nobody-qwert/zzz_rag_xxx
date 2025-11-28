@@ -6,6 +6,7 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
 import DiagnosticsPanel from "./components/DiagnosticsPanel";
+import RetrievalPanel from "./components/RetrievalPanel";
 import useGpuDiagnostics from "./hooks/useGpuDiagnostics";
 
 const ENV_CONTEXT_LIMIT = Number(import.meta.env.VITE_LLM_CONTEXT_SIZE || "10000") || 10000;
@@ -170,6 +171,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
   const [continuing, setContinuing] = useState(false);
   const [expandedSources, setExpandedSources] = useState({});
   const [activeDiagnosticsPanel, setActiveDiagnosticsPanel] = useState(null);
+  const [matchesPanelOpen, setMatchesPanelOpen] = useState(false);
   const warmupAttemptRef = useRef(false);
   const messagesBodyRef = useRef(null);
   const navigate = useNavigate();
@@ -188,6 +190,16 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
 
   const { data: gpuStats, error: gpuError, loading: gpuLoading } = useGpuDiagnostics(activeDiagnosticsPanel === "gpu");
   const handleDiagnosticsPanelChange = useCallback((panelKey) => setActiveDiagnosticsPanel(panelKey), []);
+  const toggleMatchesPanel = useCallback(() => setMatchesPanelOpen((prev) => !prev), []);
+  const latestSources = useMemo(() => {
+    for (let idx = messages.length - 1; idx >= 0; idx -= 1) {
+      const msg = messages[idx];
+      if (msg && msg.role === "assistant" && Array.isArray(msg.sources) && msg.sources.length > 0) {
+        return msg.sources;
+      }
+    }
+    return [];
+  }, [messages]);
 
   const api = { askStream: "/api/ask/stream" };
   useEffect(() => { if (onAskingChange) onAskingChange(asking || warmingUp || continuing); }, [asking, warmingUp, continuing, onAskingChange]);
@@ -466,6 +478,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
         gpuError={gpuError}
         gpuLoading={gpuLoading}
       />
+      <RetrievalPanel open={matchesPanelOpen} onToggle={toggleMatchesPanel} sources={latestSources} />
       <div style={styles.page}>
         <section style={styles.chatCard}>
         <div style={styles.sectionHeader}>
