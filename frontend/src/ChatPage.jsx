@@ -169,7 +169,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
   const [pendingFollowUp, setPendingFollowUp] = useState(null);
   const [continuing, setContinuing] = useState(false);
   const [expandedSources, setExpandedSources] = useState({});
-  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const [activeDiagnosticsPanel, setActiveDiagnosticsPanel] = useState(null);
   const warmupAttemptRef = useRef(false);
   const messagesBodyRef = useRef(null);
   const navigate = useNavigate();
@@ -186,8 +186,8 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
     return Object.keys(merged).length > 0 ? merged : null;
   }, [systemStatus]);
 
-  const { data: gpuStats, error: gpuError, loading: gpuLoading } = useGpuDiagnostics(diagnosticsOpen);
-  const toggleDiagnostics = useCallback(() => setDiagnosticsOpen((prev) => !prev), []);
+  const { data: gpuStats, error: gpuError, loading: gpuLoading } = useGpuDiagnostics(activeDiagnosticsPanel === "gpu");
+  const handleDiagnosticsPanelChange = useCallback((panelKey) => setActiveDiagnosticsPanel(panelKey), []);
 
   const api = { askStream: "/api/ask/stream" };
   useEffect(() => { if (onAskingChange) onAskingChange(asking || warmingUp || continuing); }, [asking, warmingUp, continuing, onAskingChange]);
@@ -459,8 +459,8 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
   return (
     <>
       <DiagnosticsPanel
-        open={diagnosticsOpen}
-        onToggle={toggleDiagnostics}
+        activePanel={activeDiagnosticsPanel}
+        onToggle={handleDiagnosticsPanelChange}
         groups={settingsGroups}
         gpu={gpuStats}
         gpuError={gpuError}

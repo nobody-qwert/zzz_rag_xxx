@@ -351,7 +351,7 @@ export default function IngestPage({ systemStatus = {} }) {
   const [limitPreview, setLimitPreview] = useState(true);
   const parser = FALLBACK_PARSER;
   const [expandedPerf, setExpandedPerf] = useState(new Set());
-  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const [activeDiagnosticsPanel, setActiveDiagnosticsPanel] = useState(null);
   const fileInputRef = useRef(null);
   const selectedDocRef = useRef(null);
   const lastPreviewParamsRef = useRef({ previewMaxChars, limitPreview });
@@ -429,7 +429,7 @@ export default function IngestPage({ systemStatus = {} }) {
     return Object.keys(merged).length > 0 ? merged : null;
   }, [systemStatus.settings, systemStatus.settings_snapshot, systemStatus.gpu_phase]);
 
-  const { data: gpuStats, error: gpuError, loading: gpuLoading } = useGpuDiagnostics(diagnosticsOpen);
+  const { data: gpuStats, error: gpuError, loading: gpuLoading } = useGpuDiagnostics(activeDiagnosticsPanel === "gpu");
   const displayDocs = docs.length ? docs : systemDocs;
   useEffect(() => {
     if (!selectedDoc?.hash) return;
@@ -973,13 +973,13 @@ export default function IngestPage({ systemStatus = {} }) {
     navigate("/chat");
   }, [canOpenChat, navigate]);
 
-  const toggleDiagnostics = useCallback(() => setDiagnosticsOpen((prev) => !prev), []);
+  const handleDiagnosticsPanelChange = useCallback((panelKey) => setActiveDiagnosticsPanel(panelKey), []);
 
   return (
     <div style={{ position: "relative" }}>
       <DiagnosticsPanel
-        open={diagnosticsOpen}
-        onToggle={toggleDiagnostics}
+        activePanel={activeDiagnosticsPanel}
+        onToggle={handleDiagnosticsPanelChange}
         groups={settingsGroups}
         gpu={gpuStats}
         gpuError={gpuError}

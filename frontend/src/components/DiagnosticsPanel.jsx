@@ -10,7 +10,11 @@ const SECTION_LABELS = {
 };
 
 const PANEL_WIDTH = 420;
-const HANDLE_WIDTH = 20;
+const HANDLE_WIDTH = 34;
+const PANEL_KEYS = {
+  GPU: "gpu",
+  PARAMS: "params",
+};
 
 function clampPercent(value) {
   const num = Number(value);
@@ -37,12 +41,20 @@ function normalizeGroups(groups) {
     .filter((group) => group.entries.length > 0);
 }
 
-export default function DiagnosticsPanel({ open, onToggle, groups, gpu, gpuError, gpuLoading }) {
+export default function DiagnosticsPanel({ activePanel, onToggle, groups, gpu, gpuError, gpuLoading }) {
   const sections = useMemo(() => normalizeGroups(groups), [groups]);
-  const toggle = typeof onToggle === "function" ? onToggle : () => {};
   const gpuList = Array.isArray(gpu?.gpus) ? gpu.gpus : [];
   const processList = Array.isArray(gpu?.processes) ? gpu.processes : [];
   const gpuMessage = gpuError || gpu?.error || null;
+  const currentPanel = typeof activePanel === "string" ? activePanel : null;
+
+  const isGpuOpen = currentPanel === PANEL_KEYS.GPU;
+  const isParamsOpen = currentPanel === PANEL_KEYS.PARAMS;
+
+  const handlePanelToggle = (panelKey) => {
+    if (typeof onToggle !== "function") return;
+    onToggle(currentPanel === panelKey ? null : panelKey);
+  };
 
   const renderGpuSection = () => (
     <div
@@ -119,6 +131,81 @@ export default function DiagnosticsPanel({ open, onToggle, groups, gpu, gpuError
     </div>
   );
 
+  const panelShellStyle = {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    left: 0,
+    width: PANEL_WIDTH,
+    background: "rgba(11, 15, 34, 0.96)",
+    borderRadius: "0 20px 20px 0",
+    border: "1px solid rgba(99, 102, 241, 0.28)",
+    boxShadow: "0 30px 60px rgba(5, 6, 20, 0.65)",
+    backdropFilter: "blur(10px)",
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
+    color: "#cbd5f5",
+    transition: "transform 0.25s ease",
+    overflow: "hidden",
+  };
+
+  const renderParamsSection = () => (
+    <div style={{ padding: "22px 20px", height: "100%", overflowY: "auto" }}>
+      <div style={{ fontSize: 13, letterSpacing: 0.5, opacity: 0.75, marginBottom: 6 }}>Diagnostics</div>
+      <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 16 }}>Live Parameters</div>
+      {sections.length === 0 ? (
+        <div style={{ fontSize: 12, opacity: 0.7 }}>Settings unavailable.</div>
+      ) : (
+        sections.map((section) => (
+          <div
+            key={section.key}
+            style={{
+              borderRadius: 14,
+              padding: "12px 14px",
+              marginBottom: 12,
+              background: "rgba(32, 38, 83, 0.85)",
+              boxShadow: "inset 0 0 0 1px rgba(96, 165, 250, 0.18)",
+            }}
+          >
+            <div style={{ fontSize: 13, textTransform: "uppercase", letterSpacing: 0.8, opacity: 0.75, marginBottom: 8 }}>{section.label}</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontVariantNumeric: "tabular-nums" }}>
+              {section.entries.map(([name, value]) => (
+                <div
+                  key={name}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 12,
+                    padding: "2px 0",
+                    borderBottom: "1px dotted rgba(148, 163, 184, 0.18)",
+                  }}
+                >
+                  <span style={{ opacity: 0.65 }}>{name}</span>
+                  <span style={{ fontWeight: 500, wordBreak: "break-all", textAlign: "right" }}>
+                    {value === undefined || value === null ? "—" : String(value)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  );
+
+  const renderGpuPanel = () => (
+    <div style={{ padding: "22px 20px", height: "100%", overflowY: "auto" }}>
+      <div style={{ fontSize: 13, letterSpacing: 0.5, opacity: 0.75, marginBottom: 6 }}>GPU Monitor</div>
+      <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 16 }}>Live Usage</div>
+      {renderGpuSection()}
+    </div>
+  );
+
+  const handleOffset = currentPanel ? PANEL_WIDTH : 0;
+  const handleLabels = [
+    { key: PANEL_KEYS.GPU, label: "GPU Usage" },
+    { key: PANEL_KEYS.PARAMS, label: "Params" },
+  ];
+
   return (
     <div
       style={{
@@ -133,93 +220,73 @@ export default function DiagnosticsPanel({ open, onToggle, groups, gpu, gpuError
     >
       <aside
         style={{
-          position: "absolute",
-          top: 0,
-          bottom: 0,
-          left: 0,
-          width: PANEL_WIDTH,
-          background: "rgba(11, 15, 34, 0.96)",
-          borderRadius: "0 20px 20px 0",
-          border: "1px solid rgba(99, 102, 241, 0.28)",
-          boxShadow: "0 30px 60px rgba(5, 6, 20, 0.65)",
-          backdropFilter: "blur(10px)",
-          fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
-          color: "#cbd5f5",
-          transform: open ? "translateX(0)" : `translateX(-${PANEL_WIDTH}px)`,
-          transition: "transform 0.25s ease",
-          overflow: "hidden",
-          pointerEvents: "auto",
+          ...panelShellStyle,
+          transform: isGpuOpen ? "translateX(0)" : `translateX(-${PANEL_WIDTH}px)`,
+          pointerEvents: isGpuOpen ? "auto" : "none",
+          zIndex: isGpuOpen ? 22 : 21,
         }}
       >
-        <div style={{ padding: "22px 20px", height: "100%", overflowY: "auto" }}>
-          <div style={{ fontSize: 13, letterSpacing: 0.5, opacity: 0.75, marginBottom: 6 }}>Diagnostics</div>
-          <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 16 }}>Live Parameters</div>
-          {renderGpuSection()}
-          {sections.length === 0 ? (
-            <div style={{ fontSize: 12, opacity: 0.7 }}>Settings unavailable.</div>
-          ) : (
-            sections.map((section) => (
-              <div
-                key={section.key}
-                style={{
-                  borderRadius: 14,
-                  padding: "12px 14px",
-                  marginBottom: 12,
-                  background: "rgba(32, 38, 83, 0.85)",
-                  boxShadow: "inset 0 0 0 1px rgba(96, 165, 250, 0.18)",
-                }}
-              >
-                <div style={{ fontSize: 13, textTransform: "uppercase", letterSpacing: 0.8, opacity: 0.75, marginBottom: 8 }}>
-                  {section.label}
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontVariantNumeric: "tabular-nums" }}>
-                  {section.entries.map(([name, value]) => (
-                    <div
-                      key={name}
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        gap: 12,
-                        padding: "2px 0",
-                        borderBottom: "1px dotted rgba(148, 163, 184, 0.18)",
-                      }}
-                    >
-                      <span style={{ opacity: 0.65 }}>{name}</span>
-                      <span style={{ fontWeight: 500, wordBreak: "break-all", textAlign: "right" }}>
-                        {value === undefined || value === null ? "—" : String(value)}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))
-          )}
-        </div>
+        {renderGpuPanel()}
       </aside>
-      <button
-        type="button"
-        aria-label={open ? "Hide diagnostics" : "Show diagnostics"}
-        aria-expanded={open}
-        onClick={toggle}
+      <aside
+        style={{
+          ...panelShellStyle,
+          transform: isParamsOpen ? "translateX(0)" : `translateX(-${PANEL_WIDTH}px)`,
+          pointerEvents: isParamsOpen ? "auto" : "none",
+          zIndex: isParamsOpen ? 22 : 21,
+        }}
+      >
+        {renderParamsSection()}
+      </aside>
+      <div
         style={{
           position: "absolute",
           top: "50%",
+          left: handleOffset,
           transform: "translateY(-50%)",
-          left: open ? PANEL_WIDTH : 0,
-          width: HANDLE_WIDTH,
-          height: 80,
-          borderRadius: "0 12px 12px 0",
-          border: "1px solid rgba(99, 102, 241, 0.4)",
-          background: "linear-gradient(180deg, rgba(99,102,241,0.95), rgba(79,70,229,0.9))",
-          color: "#f8fafc",
-          cursor: "pointer",
-          boxShadow: "0 12px 22px rgba(6, 10, 30, 0.65)",
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
           pointerEvents: "auto",
-          transition: "left 0.25s ease",
         }}
       >
-        {open ? "◀" : "▶"}
-      </button>
+        {handleLabels.map(({ key, label }) => {
+          const isActive = currentPanel === key;
+          return (
+            <button
+              key={key}
+              type="button"
+              aria-label={isActive ? `Hide ${label}` : `Show ${label}`}
+              aria-expanded={isActive}
+              onClick={() => handlePanelToggle(key)}
+              style={{
+                width: HANDLE_WIDTH,
+                height: 110,
+                borderRadius: "0 12px 12px 0",
+                border: "1px solid rgba(99, 102, 241, 0.4)",
+                background: isActive
+                  ? "linear-gradient(180deg, rgba(99,102,241,0.95), rgba(79,70,229,0.95))"
+                  : "linear-gradient(180deg, rgba(79,70,229,0.85), rgba(56,189,248,0.85))",
+                color: "#f8fafc",
+                cursor: "pointer",
+                boxShadow: "0 12px 22px rgba(6, 10, 30, 0.6)",
+                writingMode: "vertical-rl",
+                textTransform: "uppercase",
+                letterSpacing: 0.8,
+                fontSize: 11,
+                fontWeight: 600,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                transition: "background 0.2s ease, opacity 0.2s ease",
+                opacity: isActive ? 1 : 0.85,
+              }}
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
