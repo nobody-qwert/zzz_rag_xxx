@@ -191,12 +191,14 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
   const { data: gpuStats, error: gpuError, loading: gpuLoading } = useGpuDiagnostics(activeDiagnosticsPanel === "gpu");
   const handleDiagnosticsPanelChange = useCallback((panelKey) => setActiveDiagnosticsPanel(panelKey), []);
   const toggleMatchesPanel = useCallback(() => setMatchesPanelOpen((prev) => !prev), []);
-  const latestSources = useMemo(() => {
+  const latestMatches = useMemo(() => {
     for (let idx = messages.length - 1; idx >= 0; idx -= 1) {
       const msg = messages[idx];
-      if (msg && msg.role === "assistant" && Array.isArray(msg.sources) && msg.sources.length > 0) {
-        return msg.sources;
-      }
+      if (!msg || msg.role !== "assistant") continue;
+      const retrieval = Array.isArray(msg.retrievalSources) ? msg.retrievalSources : [];
+      if (retrieval.length > 0) return retrieval;
+      const fallback = Array.isArray(msg.sources) ? msg.sources : [];
+      if (fallback.length > 0) return fallback;
     }
     return [];
   }, [messages]);
@@ -228,7 +230,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
   };
 
   const runStreamingCompletion = useCallback(
-    async ({ payload, targetMessageId = null, anchorMessageId = null, baseContent = "", baseSources = [] }) => {
+    async ({ payload, targetMessageId = null, anchorMessageId = null, baseContent = "", baseSources = [], baseRetrievalSources = [] }) => {
       const res = await fetch(api.askStream, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       if (!res.ok || !res.body) {
         const data = await readJsonSafe(res);
@@ -240,13 +242,14 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
       let accumulated = baseContent || "";
       let finalMeta = null;
       let mergedSources = Array.isArray(baseSources) ? baseSources : [];
+      let mergedRetrievalSources = Array.isArray(baseRetrievalSources) ? baseRetrievalSources : [];
       let assistantId = targetMessageId;
 
       const ensureAssistant = () => {
         if (assistantId) return assistantId;
         const newId = createMessageId();
         assistantId = newId;
-        setMessages((prev) => [...prev, { id: newId, role: "assistant", content: "" }]);
+        setMessages((prev) => [...prev, { id: newId, role: "assistant", content: "", sources: mergedSources, retrievalSources: mergedRetrievalSources }]);
         return newId;
       };
 
@@ -339,6 +342,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
               updateAssistant(accumulated);
             }
             mergedSources = mergeSources(mergedSources, evt.sources);
+            mergedRetrievalSources = mergeSources(mergedRetrievalSources, evt.retrieval_sources);
           } else if (evt.type === "error") {
             throw new Error(evt.error || "Streaming error");
           }
@@ -356,6 +360,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
               updateAssistant(accumulated);
             }
             mergedSources = mergeSources(mergedSources, evt.sources);
+            mergedRetrievalSources = mergeSources(mergedRetrievalSources, evt.retrieval_sources);
           } else if (evt.type === "error") {
             throw new Error(evt.error || "Streaming error");
           }
@@ -380,6 +385,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
             ...msg,
             content: accumulated,
             sources: mergeSources(mergedSources, finalMeta.sources),
+            retrievalSources: mergeSources(mergedRetrievalSources, finalMeta.retrieval_sources),
             hideSources: needsFollowUp,
             pendingFollowUp: needsFollowUp,
             finishReason: finalMeta.finish_reason || null,
@@ -435,6 +441,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
         anchorMessageId: pendingFollowUp.messageId,
         baseContent: existingAssistant.content || "",
         baseSources: existingAssistant.sources || [],
+        baseRetrievalSources: existingAssistant.retrievalSources || [],
       });
     } catch (e) {
       setMessages((prev) => [...prev, { id: createMessageId(), role: "assistant", content: `Error continuing response: ${e.message || String(e)}`, error: true }]);
@@ -478,7 +485,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
         gpuError={gpuError}
         gpuLoading={gpuLoading}
       />
-      <RetrievalPanel open={matchesPanelOpen} onToggle={toggleMatchesPanel} sources={latestSources} />
+      <RetrievalPanel open={matchesPanelOpen} onToggle={toggleMatchesPanel} sources={latestMatches} />
       <div style={styles.page}>
         <section style={styles.chatCard}>
         <div style={styles.sectionHeader}>

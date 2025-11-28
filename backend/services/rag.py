@@ -281,6 +281,7 @@ async def _prepare_question_payload(
         "history_for_prompt": history_for_prompt,
         "history_truncated": history_truncated,
         "context_sections": context_sections,
+        "retrieval_sections": filtered_sections,
         "context_truncated": context_truncated,
         "context_tokens_used": context_tokens_used,
         "context_usage_ratio": context_usage_ratio,
@@ -303,6 +304,7 @@ async def ask_question(req: AskRequest) -> AskResponse:
     history_truncated: bool = prepared["history_truncated"]
     context_sections: List[Dict[str, Any]] = prepared["context_sections"]
     context_truncated: bool = prepared["context_truncated"]
+    retrieval_sections: List[Dict[str, Any]] = prepared.get("retrieval_sections", context_sections)
     context_tokens_used: int = prepared["context_tokens_used"]
     context_usage_ratio: float = prepared["context_usage_ratio"]
     docs_by_hash: Dict[str, Any] = prepared["docs_by_hash"]
@@ -348,6 +350,7 @@ async def ask_question(req: AskRequest) -> AskResponse:
             raise HTTPException(status_code=500, detail=f"LLM call failed: {exc}")
 
     sources = _build_sources(context_sections, docs_by_hash, chunks_per_doc)
+    retrieval_sources = _build_sources(retrieval_sections, docs_by_hash, chunks_per_doc)
 
     await _persist_conversation_turn(
         conversation_id=conversation_id,
@@ -378,6 +381,7 @@ async def ask_question(req: AskRequest) -> AskResponse:
     return AskResponse(
         answer=answer,
         sources=sources,
+        retrieval_sources=retrieval_sources,
         conversation_id=conversation_id,
         context_tokens_used=context_tokens_used,
         context_window_limit=settings.chat_context_window,
@@ -703,6 +707,7 @@ async def stream_question(req: AskRequest):
             order += 1
 
             sources = _build_sources(context_sections, docs_by_hash, chunks_per_doc)
+            retrieval_sources = _build_sources(filtered_sections, docs_by_hash, chunks_per_doc)
 
             call_start = time.perf_counter()
 
@@ -779,6 +784,7 @@ async def stream_question(req: AskRequest):
                 "answer": final_answer,
                 "conversation_id": conversation_id,
                 "sources": sources,
+                "retrieval_sources": retrieval_sources,
                 "context_tokens_used": context_tokens_used,
                 "context_window_limit": settings.chat_context_window,
                 "context_usage": context_usage_ratio,

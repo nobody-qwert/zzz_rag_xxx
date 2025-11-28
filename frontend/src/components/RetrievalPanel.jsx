@@ -96,7 +96,7 @@ export default function RetrievalPanel({ open, onToggle, sources }) {
       {sourceList.length === 0 ? (
         <div style={{ fontSize: 12, opacity: 0.75 }}>No retrieval matches yet.</div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: 320, overflowY: "auto" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {sourceList.map((chunk, idx) => {
             const chunkKey = chunk.chunk_id || `${chunk.doc_hash || "doc"}-${chunk.order_index ?? idx}`;
             const expandedState = expanded.has(chunkKey);
@@ -165,7 +165,7 @@ export default function RetrievalPanel({ open, onToggle, sources }) {
       {docSummaries.length === 0 ? (
         <div style={{ fontSize: 12, opacity: 0.75 }}>Documents with matches will appear here.</div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 180, overflowY: "auto" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {docSummaries.map((doc) => (
             <div
               key={doc.key}

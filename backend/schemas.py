@@ -15,6 +15,7 @@ class AskRequest(BaseModel):
 class AskResponse(BaseModel):
     answer: str
     sources: List[Dict[str, Any]] = Field(default_factory=list)
+    retrieval_sources: List[Dict[str, Any]] = Field(default_factory=list)
     conversation_id: str
     context_tokens_used: int
     context_window_limit: int
