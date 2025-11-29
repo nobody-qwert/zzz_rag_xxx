@@ -266,6 +266,18 @@ The LLM responds:
 > The contract with ACME Corp specifies a **30 days’ prior written notice** for termination.  
 > This comes from document `contract_123`, which states: “Either party may terminate this Agreement with thirty (30) days’ prior written notice…”.
 
+### 3.4. Route Selection Cheat Sheet
+
+Map the query decomposition output (`intent`, `primary_buckets`, `constraints`) into one of the practical routes from `docs/architecture/rag_workflow.md` so the reviewer/controller knows which tools to favor.
+
+| Decomposition signals | Preferred route | Tool bias | Notes |
+| --- | --- | --- | --- |
+| `intent` = `list` or `compute` + explicit numeric/metadata constraints | Structured / annotations-first | `annotations_search`, `annotations_aggregate`, then fall back to `search_text` if empty | Mirrors the “receipts containing tires” workflow where rows are filtered via `properties.*` before touching long-text search. |
+| Mixed constraints, partial annotation coverage, or contradictory signals | Hybrid | Run annotations for whatever coverage exists, then call `search_text` or `search_semantic` in the same bucket | Matches the fallback rules described in the architecture doc’s route-selection section (structured → hybrid → long-text). |
+| `intent` = `summarize` or `qa` with no structured fields, manuals-heavy corpora | Long-text | `search_semantic` scoped to summaries, then drill into segments | Aligns with the long-text route that starts at summary vectors before fetching fine-grained snippets. |
+
+Persist the router’s choice and fallback ordering (success/failure, cutoffs) for observability—this mirrors the logging guidance in `docs/architecture/rag_workflow.md` and helps future tuning.
+
 ---
 
 ## 4. Orchestrator Loop (Multi-Step Pattern)
@@ -284,6 +296,11 @@ def agentic_answer(user_query):
 
         if decision["status"] == "enough":
             break
+
+        if decision["status"] == "clarify":
+            issue = decision["clarification"]
+            emit_clarification_prompt(issue["type"], issue["attempts"], issue["reason"])
+            return
 
         next_call = decision["next_tool_call"]
         if not next_call:
@@ -310,6 +327,110 @@ def agentic_answer(user_query):
 This gives you **fine-grained control** and observability:
 - You can log `plan`, `evidence`, decisions, etc.
 - You can enforce strict limits on tools / buckets.
+- When `llm_review_evidence` signals a clarification (No/Low Results vs Result Overload), call the corresponding templates from Section 10 so the user understands what failed before narrowing their request.
+
+### 4.1. High-Level Workflow Diagram
+
+```mermaid
+flowchart LR
+    UQ[User Query] --> PRE["Preprocess & intent detection (P1)"]
+    PRE --> ROUTE["Route selection & tool plan (P2)"]
+    ROUTE --> EXEC[Execute retrieval tools]
+    EXEC --> EVAL{Evidence status?}
+    EVAL -->|Sufficient + manageable| BUNDLE[Assemble & compress evidence]
+    BUNDLE --> PROMPT["Prompt LLM & craft answer (P5)"]
+    PROMPT --> POST[Post-process, log, update convo state]
+    POST --> NEXT[Next user turn]
+
+    EVAL -->|Insufficient| RELAX[Auto-relax filters & thresholds]
+    RELAX -->|Recovered evidence| PRE
+    RELAX -->|Still empty| CLAR_NOLOW["Clarify (No/Low results) (P3)"]
+    EVAL -->|Overflow| CLAR_OVERLOAD["Clarify (Result overload) (P4)"]
+    CLAR_NOLOW --> PRE
+    CLAR_OVERLOAD --> PRE
+
+    style PRE fill:#fef9c3,stroke:#d97706,color:#000
+    style ROUTE fill:#fef9c3,stroke:#d97706,color:#000,stroke-width:4px
+    style EXEC fill:#fef9c3,stroke:#d97706,color:#000
+    style EVAL fill:#fef9c3,stroke:#d97706,color:#000
+    style RELAX fill:#fef9c3,stroke:#d97706,color:#000
+    style CLAR_NOLOW fill:#dcfce7,stroke:#15803d,color:#000,stroke-width:4px
+    style CLAR_OVERLOAD fill:#dcfce7,stroke:#15803d,color:#000,stroke-width:4px
+    style BUNDLE fill:#fef9c3,stroke:#d97706,color:#000
+    style PROMPT fill:#dcfce7,stroke:#15803d,color:#000
+    style POST fill:#fef9c3,stroke:#d97706,color:#000
+```
+
+### 4.2. Route Selection Detail
+
+This mirrors the cheat sheet in Section 3.4 but visualizes how the router evaluates structured/hybrid/long-text paths and queues fallbacks.
+
+```mermaid
+flowchart TD
+    INTENT["Intent classification LLM (P1)"]
+    HISTORY[Conversation summary / follow-up cues]
+
+    INTENT --> PROMPT[Assemble route-selection prompt]
+    HISTORY --> PROMPT
+
+    PROMPT --> LLM["LLM route planner (P2)"]
+    LLM --> SCORE[Ranked routes + fallbacks]
+
+    SCORE -->|Structured| STRUCT_ROUTE[Plan annotations_search + aggregate]
+    SCORE -->|Hybrid| HYBRID_ROUTE[Plan annotations + vector/text search]
+    SCORE -->|Long text| LONG_ROUTE[Plan summary + segment vector search]
+
+    STRUCT_ROUTE --> CHECK{Results sufficient?}
+    HYBRID_ROUTE --> CHECK
+    LONG_ROUTE --> CHECK
+
+    CHECK -->|No| FALLBACK[Queue next-best route or ask clarification]
+    FALLBACK --> SCORE
+    CHECK -->|Yes| EXECUTE[Execute selected plan]
+
+    style INTENT fill:#dcfce7,stroke:#15803d,color:#000
+    style PROMPT fill:#fef9c3,stroke:#d97706,color:#000
+    style LLM fill:#dcfce7,stroke:#15803d,color:#000
+    style SCORE fill:#fef9c3,stroke:#d97706,color:#000
+    style STRUCT_ROUTE fill:#fef9c3,stroke:#d97706,color:#000
+    style HYBRID_ROUTE fill:#fef9c3,stroke:#d97706,color:#000
+    style LONG_ROUTE fill:#fef9c3,stroke:#d97706,color:#000
+    style CHECK fill:#fef9c3,stroke:#d97706,color:#000
+    style FALLBACK fill:#fef9c3,stroke:#d97706,color:#000
+    style EXECUTE fill:#fef9c3,stroke:#d97706,color:#000
+```
+
+### 4.3. Clarification & Multi-turn Loop
+
+Use this diagram when wiring the `clarify` branch from the pseudo-code into concrete prompts (Section 10).
+
+```mermaid
+flowchart TD
+    DETECT[Detect zero hits / low confidence / overload]
+    DETECT --> AUTORELAX[Auto-relax filters & thresholds]
+    AUTORELAX --> CHECK{Resolved without clarification?}
+
+    CHECK -->|Yes| PREPROCESS[Return to preprocess step]
+    CHECK -->|No| ISSUE{Issue type?}
+    ISSUE -->|No/Low evidence| ASK_LOW["Clarification (No/Low results) (P3)"]
+    ISSUE -->|Result overload| ASK_OVER["Clarification (Result overload) (P4)"]
+
+    ASK_LOW --> CAPTURE_LOW[Capture new constraints + update summary]
+    ASK_OVER --> CAPTURE_OVER[Capture filters/preferences + update summary]
+
+    CAPTURE_LOW --> PREPROCESS
+    CAPTURE_OVER --> PREPROCESS
+
+    style DETECT fill:#fef9c3,stroke:#d97706,color:#000
+    style AUTORELAX fill:#fef9c3,stroke:#d97706,color:#000
+    style CHECK fill:#fef9c3,stroke:#d97706,color:#000
+    style ISSUE fill:#fef9c3,stroke:#d97706,color:#000
+    style ASK_LOW fill:#dcfce7,stroke:#15803d,color:#000,stroke-width:4px
+    style ASK_OVER fill:#dcfce7,stroke:#15803d,color:#000,stroke-width:4px
+    style CAPTURE_LOW fill:#fef9c3,stroke:#d97706,color:#000
+    style CAPTURE_OVER fill:#fef9c3,stroke:#d97706,color:#000
+    style PREPROCESS fill:#fef9c3,stroke:#d97706,color:#000
+```
 
 ---
 
@@ -456,6 +577,9 @@ This step turns a natural-language query into a **structured JSON plan** that do
 - Apply metadata/structured filters.
 - Form good sub-queries for full-text and semantic search.
 - Choose an appropriate output format (list, table, summary, etc.).
+
+> **Conversation hygiene reminder**  
+> Carry forward a compact (≤400 token) rolling conversation summary and honor explicit “new topic” resets before invoking decomposition, as described in `docs/architecture/rag_workflow.md`. This keeps pronoun resolution accurate and prevents the planner from inheriting stale constraints.
 
 ### 8.1. Responsibilities of the Decomposition Step
 
@@ -850,3 +974,34 @@ While the precise number of iterations depends on corpus quality and the user qu
 | Chemical solvents (Section 8.4.3) | 1 | 1 | 5 | 4 | 1 | Needs multiple bucket hops (datasheets + certificates) before enough evidence exists for each property. |
 
 *Review/Control count includes the final iteration that returns `"enough"` without calling an additional tool. Actual numbers may shrink when documents are well-tagged or expand when the agent must inspect noisy hits.*
+
+---
+
+## 10. Representative Retrieval Use Cases & Clarification Patterns
+
+These scenarios originate from `docs/architecture/rag_workflow.md` and now live here so the new plan captures the rich examples from the earlier workflow write-up.
+
+### 10.1. Structured enumeration (annotations-first)
+- **User question**: “List every tire purchase receipt.”
+- **Plan**: Detect enumeration intent + structured filters, select the annotations route, and run `annotations_search` with predicates such as `properties.item_desc~"tire"` and constrained date ranges for the `invoices`/`receipts` bucket. Call `search_text` only if structured coverage is exhausted.
+- **Clarification**: When matches exceed snippet/table limits (the architecture doc cites 1,042 hits), trigger the **Result Overload** prompt so the user can narrow by vendor, timeframe, or quantity, or request CSV export.
+
+### 10.2. Numeric lookup (key-value annotations)
+- **User question**: “What is the minimum panel width for AlphaSolar models?”
+- **Plan**: Stick to the structured bucket, search annotation labels that are lexically or semantically close to “width/height”, and apply numeric filters on stored values. Summaries/vector search become a fallback only if the annotations route produces zero evidence.
+- **Clarification**: If both the key-value lookup and the summary-vector check return nothing, emit the **No/Low Results** prompt that lists the attempted filters plus suggestions (alternate model names, acceptable ranges, upload date filters).
+
+### 10.3. Conceptual/manual deep dive (summary → segment vectors)
+- **User question**: “Explain the maintenance steps for battery cabinet B-120.”
+- **Plan**: Choose the long-text route highlighted in `docs/architecture/rag_workflow.md`: run summary-level semantic search scoped to manual-like buckets, hydrate the top summaries, then drill into segments via local vector search to assemble multi-snippet evidence.
+- **Clarification**: When summaries overflow or stay off-topic, describe the relaxation attempts (widened categories, lowered score thresholds) and ask the user to constrain document type, section, or timeframe before retrying.
+
+### 10.4. Clarification prompt templates (No/Low vs Result Overload)
+- **No/Low Results**:
+  - System message: “Retrieval cannot proceed with the current scope (Reason: {{reason_summary}}). Summarize what was tried and ask for targeted clarification.”
+  - Include the original question, every attempted tool/filter combo with match counts, and a short list of intent-specific hints (alternate terms, IDs, acceptable ranges). Offer example follow-ups such as “search all documents” or “switch to text search.”
+- **Result Overload**:
+  - System message: “Retrieval produced too many matches to summarize (Reason: {{reason_summary}}). Summarize what was tried and ask for targeted filters.”
+  - List each attempt with match counts vs limits, state where overflow results are stored, and nudge the user toward filters like vendor/date/quantity thresholds or export requests (e.g., “filter to 2024 only”, “export full CSV”).
+
+Reuse these templates directly when the reviewer loop emits a `clarify` decision (Section 4), so users always understand why the agent paused and what inputs will unblock the next retrieval pass.
