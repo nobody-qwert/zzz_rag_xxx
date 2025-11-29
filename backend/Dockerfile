@@ -14,11 +14,12 @@ RUN uv pip install --system \
     uvicorn[standard]\>=0.29 \
     aiosqlite\>=0.19 \
     PyMuPDF\>=1.24.0 \
-    tiktoken\>=0.7.0 \
     numpy\>=1.24 \
     openai\>=1.40.0 \
     python-multipart\>=0.0.9 \
-    httpx\>=0.27.0
+    httpx\>=0.27.0 \
+    jinja2\>=3.1 \
+    transformers\>=4.40
 
 # Runtime image
 FROM python:3.10-slim-bookworm

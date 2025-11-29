@@ -17,20 +17,21 @@ from .taxonomy import (
     get_subcategory,
 )
 
+try:
+    from ...token_utils import truncate_text_to_tokens
+except ImportError:  # pragma: no cover
+    from token_utils import truncate_text_to_tokens  # type: ignore
+
 logger = logging.getLogger(__name__)
 
-# Approximate conversion from tokens→characters so we can align our input length
-# with the LLM context window without tokenizing the text.
-APPROX_CHARS_PER_TOKEN = 3
-# Keep some buffer for prompts, reasoning, and the model's reply.
 CLASSIFICATION_PROMPT_TOKEN_RESERVE = 800
+MIN_CLASSIFICATION_TOKENS = 512
 VALID_TOP_LEVEL_IDS = {entry["id"] for entry in get_top_level_categories()}
 
 
-def _classification_char_limit() -> int:
-    context_tokens = max(settings.chat_context_window, CLASSIFICATION_PROMPT_TOKEN_RESERVE + 512)
-    usable_tokens = max(512, context_tokens - CLASSIFICATION_PROMPT_TOKEN_RESERVE)
-    return usable_tokens * APPROX_CHARS_PER_TOKEN
+def _classification_token_limit() -> int:
+    context_tokens = max(settings.chat_context_window, CLASSIFICATION_PROMPT_TOKEN_RESERVE + MIN_CLASSIFICATION_TOKENS)
+    return max(MIN_CLASSIFICATION_TOKENS, context_tokens - CLASSIFICATION_PROMPT_TOKEN_RESERVE)
 
 
 def _clean_text(text: str, limit: int) -> str:
@@ -38,6 +39,19 @@ def _clean_text(text: str, limit: int) -> str:
     if limit and len(text) > limit:
         return text[:limit]
     return text
+
+
+def _prepare_classification_text(text: str) -> str:
+    token_limit = _classification_token_limit()
+    truncated = truncate_text_to_tokens(
+        text,
+        token_limit,
+        tokenizer_id=settings.llm_tokenizer_id,
+    )
+    if truncated:
+        return truncated.strip()
+    approx_chars = token_limit * 4
+    return _clean_text(text, approx_chars)
 
 
 def _extract_json(payload: str) -> Dict[str, Any]:
@@ -72,7 +86,7 @@ async def classify_document_text(
     document_name: Optional[str] = None,
     metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    clean_text = _clean_text(text, _classification_char_limit())
+    clean_text = _prepare_classification_text(text)
     if not clean_text:
         raise HTTPException(status_code=400, detail="Cannot classify empty text")
 

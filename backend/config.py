@@ -41,6 +41,7 @@ class AppSettings:
     llm_base_url: str
     llm_api_key: str
     llm_model: str
+    llm_tokenizer_id: str
     llm_temperature: float
     llm_top_p: Optional[float]
     llm_top_k: Optional[int]
@@ -52,6 +53,7 @@ class AppSettings:
     gpu_phase_timeout: float
     llm_ready_timeout: float
     diagnostics_url: Optional[str]
+    embedding_tokenizer_id: str
 
 
 def _int_env(name: str, default: str) -> int:
@@ -81,6 +83,7 @@ def load_settings() -> AppSettings:
     chat_completion_max_tokens = _int_env("CHAT_COMPLETION_MAX_TOKENS", "2048")
     chat_completion_reserve = _int_env("CHAT_COMPLETION_RESERVE", str(chat_completion_max_tokens))
     llm_context_size = _int_env("LLM_CONTEXT_SIZE", "10000")
+    llm_tokenizer_id = _str_env("LLM_TOKENIZER_ID", "Qwen/Qwen3-30B-A3B")
 
     ocr_parser_key = _str_env("OCR_PARSER_KEY", "mineru").lower()
     chunk_size = _int_env("CHUNK_SIZE", "200")
@@ -138,6 +141,7 @@ def load_settings() -> AppSettings:
         llm_base_url=_str_env("LLM_BASE_URL"),
         llm_api_key=_str_env("LLM_API_KEY"),
         llm_model=_str_env("LLM_MODEL", "default"),
+        llm_tokenizer_id=llm_tokenizer_id,
         llm_temperature=_float_env("LLM_TEMPERATURE", "0.2"),
         llm_top_p=_optional_float_env("LLM_TOP_P"),
         llm_top_k=_optional_int_env("LLM_TOP_K"),
@@ -149,6 +153,7 @@ def load_settings() -> AppSettings:
         gpu_phase_timeout=_float_env("GPU_PHASE_TIMEOUT", "60"),
         llm_ready_timeout=_float_env("LLM_READY_TIMEOUT", "180"),
         diagnostics_url=diagnostics_url or None,
+        embedding_tokenizer_id=_str_env("EMBEDDING_TOKENIZER_ID", "nomic-ai/nomic-embed-text-v1.5"),
     )
 
 

@@ -1,66 +1,81 @@
 from __future__ import annotations
 
 import math
-from functools import lru_cache
-from typing import Iterable, List, Optional
+from typing import Iterable, Optional
 
 try:
-    import tiktoken  # type: ignore
-except Exception:  # pragma: no cover - optional dependency
-    tiktoken = None
+    from .tokenizer_registry import (
+        count_chat_tokens,
+        count_text_tokens,
+        record_tokenizer_fallback,
+        truncate_text,
+    )
+except ImportError:  # pragma: no cover
+    from tokenizer_registry import (  # type: ignore
+        count_chat_tokens,
+        count_text_tokens,
+        record_tokenizer_fallback,
+        truncate_text,
+    )
 
-_DEFAULT_ENCODING = "cl100k_base"
-
-
-@lru_cache(maxsize=8)
-def _load_encoder(model: Optional[str] = None):  # type: ignore[override]
-    if not tiktoken:
-        return None
-    try:
-        if model:
-            return tiktoken.encoding_for_model(model)
-    except Exception:
-        pass
-    try:
-        return tiktoken.get_encoding(_DEFAULT_ENCODING)
-    except Exception:
-        return None
+_FALLBACK_CHARS_PER_TOKEN = 4
 
 
-def estimate_tokens(text: str, *, model: Optional[str] = None) -> int:
+def _fallback_token_estimate(text: str) -> int:
+    return max(1, math.ceil(len(text) / _FALLBACK_CHARS_PER_TOKEN))
+
+
+def estimate_tokens(
+    text: str,
+    *,
+    tokenizer_id: Optional[str] = None,
+    model: Optional[str] = None,
+) -> int:
     if not text:
         return 0
-    encoder = _load_encoder(model)
-    if encoder is not None:
-        try:
-            return len(encoder.encode(text))
-        except Exception:
-            pass
-    # Rough fallback: ~4 characters per token
-    return max(1, math.ceil(len(text) / 4))
+    identifier = (tokenizer_id or model or "").strip()
+    if identifier:
+        token_count = count_text_tokens(text, identifier)
+        if token_count is not None:
+            return token_count
+        record_tokenizer_fallback(identifier, "text_count_fallback")
+    return _fallback_token_estimate(text)
 
 
-def estimate_messages_tokens(messages: Iterable[dict], *, model: Optional[str] = None) -> int:
+def estimate_messages_tokens(
+    messages: Iterable[dict],
+    *,
+    tokenizer_id: Optional[str] = None,
+    model: Optional[str] = None,
+) -> int:
+    identifier = (tokenizer_id or model or "").strip()
+    cached_messages = list(messages)
+    if identifier:
+        token_count = count_chat_tokens(cached_messages, identifier)
+        if token_count is not None:
+            return token_count
+        record_tokenizer_fallback(identifier, "chat_count_fallback")
     total = 0
-    for message in messages:
+    for message in cached_messages:
         total += 4  # per-message structural overhead heuristic
-        total += estimate_tokens(str(message.get("content", "")), model=model)
+        total += estimate_tokens(str(message.get("content", "")), tokenizer_id=identifier or None)
     return total + 2  # assistant priming per OpenAI guideline
 
 
-def truncate_text_to_tokens(text: str, max_tokens: int, *, model: Optional[str] = None) -> str:
+def truncate_text_to_tokens(
+    text: str,
+    max_tokens: int,
+    *,
+    tokenizer_id: Optional[str] = None,
+    model: Optional[str] = None,
+) -> str:
     if max_tokens <= 0 or not text:
         return ""
-    encoder = _load_encoder(model)
-    if encoder is None:
-        # fallback to character-level truncation
-        approx_chars = max_tokens * 4
-        return text[:approx_chars]
-    tokens = encoder.encode(text)
-    if len(tokens) <= max_tokens:
-        return text
-    trimmed = tokens[:max_tokens]
-    try:
-        return encoder.decode(trimmed)
-    except Exception:
-        return text[: max_tokens * 4]
+    identifier = (tokenizer_id or model or "").strip()
+    if identifier:
+        truncated = truncate_text(text, max_tokens, identifier)
+        if truncated is not None:
+            return truncated
+        record_tokenizer_fallback(identifier, "truncate_fallback")
+    approx_chars = max_tokens * _FALLBACK_CHARS_PER_TOKEN
+    return text[:approx_chars]

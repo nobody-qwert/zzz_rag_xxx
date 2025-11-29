@@ -37,7 +37,12 @@ def run_chunking(
     *,
     progress_cb: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> List[Any]:
-    chunk_views = chunk_text_multi(text, chunk_specs, progress_cb=progress_cb)
+    chunk_views = chunk_text_multi(
+        text,
+        chunk_specs,
+        tokenizer_id=settings.embedding_tokenizer_id,
+        progress_cb=progress_cb,
+    )
     ordered_specs = list(chunk_specs)
     spec_names = [spec.name for spec in ordered_specs] if ordered_specs else list(chunk_views.keys())
     combined: List[Any] = []

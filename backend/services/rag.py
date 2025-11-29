@@ -210,7 +210,7 @@ async def _prepare_question_payload(
 
     trimmed_history, history_truncated, _ = trim_history_for_budget(
         history_messages,
-        model=settings.llm_model,
+        tokenizer_id=settings.llm_tokenizer_id,
         token_limit=prompt_token_limit,
         system_prompt=settings.system_prompt,
     )
@@ -251,7 +251,11 @@ async def _prepare_question_payload(
         remaining = prompt_token_limit - _estimate_prompt_tokens(without_user)
         if remaining <= 0:
             raise HTTPException(status_code=500, detail="Prompt exceeds available context even after trimming")
-        truncated = truncate_text_to_tokens(question, remaining, model=settings.llm_model)
+        truncated = truncate_text_to_tokens(
+            question,
+            remaining,
+            tokenizer_id=settings.llm_tokenizer_id,
+        )
         if not truncated:
             truncated = question[:200]
         if truncated == user_message_for_llm:
@@ -360,7 +364,7 @@ async def ask_question(req: AskRequest) -> AskResponse:
         is_continuation=is_continuation,
     )
 
-    token_count = estimate_tokens(answer, model=settings.llm_model)
+    token_count = estimate_tokens(answer, tokenizer_id=settings.llm_tokenizer_id)
     if generation_seconds is None:
         generation_seconds = 0.0
     tokens_per_second = token_count / max(generation_seconds, 1e-6) if token_count and generation_seconds is not None else None
@@ -424,7 +428,7 @@ async def _embed_query(text: str, client: EmbeddingClient) -> Any:
 
 
 def _estimate_prompt_tokens(messages: List[Dict[str, str]]) -> int:
-    return estimate_messages_tokens(messages, model=settings.llm_model)
+    return estimate_messages_tokens(messages, tokenizer_id=settings.llm_tokenizer_id)
 
 
 async def _generate_hyde_answer(question: str, history_summary: str) -> Optional[str]:
@@ -634,7 +638,7 @@ async def stream_question(req: AskRequest):
 
             trimmed_history, history_truncated, _ = trim_history_for_budget(
                 history_messages,
-                model=settings.llm_model,
+                tokenizer_id=settings.llm_tokenizer_id,
                 token_limit=prompt_token_limit,
                 system_prompt=settings.system_prompt,
             )
@@ -679,7 +683,11 @@ async def stream_question(req: AskRequest):
                 remaining = prompt_token_limit - _estimate_prompt_tokens(without_user)
                 if remaining <= 0:
                     raise HTTPException(status_code=500, detail="Prompt exceeds available context even after trimming")
-                truncated = truncate_text_to_tokens(question, remaining, model=settings.llm_model)
+                truncated = truncate_text_to_tokens(
+                    question,
+                    remaining,
+                    tokenizer_id=settings.llm_tokenizer_id,
+                )
                 if not truncated:
                     truncated = question[:200]
                 if truncated == user_message_for_llm:
@@ -756,7 +764,7 @@ async def stream_question(req: AskRequest):
             total_time = time.perf_counter() - call_start
             time_to_first_token = time_to_first_token or total_time
             generation_seconds = max(0.0, total_time - time_to_first_token)
-            token_count = estimate_tokens(final_answer, model=settings.llm_model)
+            token_count = estimate_tokens(final_answer, tokenizer_id=settings.llm_tokenizer_id)
             tokens_per_second = token_count / max(generation_seconds, 1e-6) if generation_seconds is not None else None
             steps.append(
                 {
@@ -899,14 +907,14 @@ async def _persist_conversation_turn(
     is_continuation: bool,
 ) -> None:
     if not is_continuation:
-        user_token_count = estimate_tokens(question, model=settings.llm_model)
+        user_token_count = estimate_tokens(question, tokenizer_id=settings.llm_tokenizer_id)
         await document_store.append_conversation_message(
             conversation_id,
             role="user",
             content=question,
             token_count=user_token_count,
         )
-    assistant_token_count = estimate_tokens(answer, model=settings.llm_model)
+    assistant_token_count = estimate_tokens(answer, tokenizer_id=settings.llm_tokenizer_id)
     await document_store.append_conversation_message(
         conversation_id,
         role="assistant",

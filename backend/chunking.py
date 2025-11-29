@@ -4,6 +4,11 @@ from dataclasses import dataclass
 from hashlib import md5
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
+try:
+    from .tokenizer_registry import load_tokenizer, record_tokenizer_fallback
+except ImportError:  # pragma: no cover
+    from tokenizer_registry import load_tokenizer, record_tokenizer_fallback  # type: ignore
+
 
 @dataclass
 class Chunk:
@@ -28,29 +33,34 @@ class ChunkWindowSpec:
         return max(1, base)
 
 
-def _tokenizer() -> any:
-    try:
-        import tiktoken  # type: ignore
-
-        enc = tiktoken.get_encoding("cl100k_base")
-        return enc
-    except Exception:  # pragma: no cover - fallback
+def _tokenizer(tokenizer_id: Optional[str]) -> Any:
+    identifier = (tokenizer_id or "").strip()
+    if not identifier:
         return None
+    return load_tokenizer(identifier)
 
 
-def _encode(enc, text: str) -> List[int]:
+def _encode(enc, text: str, identifier: Optional[str]) -> List[int]:
     if enc is None:
         # naive fallback: 1 token per ~4 chars
+        if identifier:
+            record_tokenizer_fallback(identifier, "chunk_encode_fallback")
         n = max(1, len(text) // 4)
         return list(range(n))
-    return enc.encode(text)
+    try:
+        return enc.encode(text, add_special_tokens=False)
+    except TypeError:
+        return enc.encode(text)
 
 
 def _decode(enc, tokens: Sequence[int]) -> str:
     if enc is None:
         # cannot reconstruct; not used in fallback path
         return ""
-    return enc.decode(list(tokens))
+    try:
+        return enc.decode(list(tokens), skip_special_tokens=True)
+    except TypeError:
+        return enc.decode(list(tokens))
 
 
 def _materialize_span(
@@ -137,11 +147,12 @@ def chunk_text_multi(
     text: str,
     specs: Sequence[ChunkWindowSpec],
     *,
+    tokenizer_id: Optional[str] = None,
     progress_cb: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> Dict[str, List[Chunk]]:
     """Return chunk lists for each spec using a shared tokenization."""
-    enc = _tokenizer()
-    token_ids = _encode(enc, text)
+    enc = _tokenizer(tokenizer_id)
+    token_ids = _encode(enc, text, tokenizer_id)
     spec_list = list(specs)
     total_specs = max(1, len(spec_list))
     results: Dict[str, List[Chunk]] = {}

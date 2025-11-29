@@ -7,12 +7,14 @@ from fastapi import APIRouter
 
 try:
     from ..dependencies import document_store, jobs_registry, settings, gpu_phase_manager
+    from ..tokenizer_registry import tokenizer_diagnostics
     from .helpers import format_document_row
     from ..services.ingestion import warmup_mineru
     from ..services.rag import warmup_llm
     from ..utils.gpu import get_gpu_snapshot
 except ImportError:  # pragma: no cover
     from dependencies import document_store, jobs_registry, settings, gpu_phase_manager  # type: ignore
+    from tokenizer_registry import tokenizer_diagnostics  # type: ignore
     from routes.helpers import format_document_row  # type: ignore
     from services.ingestion import warmup_mineru  # type: ignore
     from services.rag import warmup_llm  # type: ignore
@@ -37,6 +39,9 @@ def _get_chunk_config(config_id):
 
 def _settings_snapshot() -> Dict[str, Dict[str, Any]]:
     env = os.environ
+    tokenizer_diag = tokenizer_diagnostics()
+    llm_tok = tokenizer_diag.get(settings.llm_tokenizer_id, {})
+    embedding_tok = tokenizer_diag.get(settings.embedding_tokenizer_id, {})
     return {
         "ocr": {
             "parser_key": settings.ocr_parser_key,
@@ -57,6 +62,10 @@ def _settings_snapshot() -> Dict[str, Dict[str, Any]]:
             "model": env.get("EMBEDDING_MODEL", ""),
             "batch_size": env.get("EMBEDDING_BATCH_SIZE", "1"),
             "context_size": env.get("EMBED_CONTEXT_SIZE", ""),
+            "tokenizer_id": settings.embedding_tokenizer_id,
+            "tokenizer_loaded": embedding_tok.get("loaded"),
+            "tokenizer_fallbacks": embedding_tok.get("fallback_count"),
+            "tokenizer_last_error": embedding_tok.get("error"),
         },
         "llm": {
             "base_url": settings.llm_base_url,
@@ -64,6 +73,10 @@ def _settings_snapshot() -> Dict[str, Dict[str, Any]]:
             "context_window": settings.chat_context_window,
             "max_completion_tokens": settings.chat_completion_max_tokens,
             "reserve_tokens": settings.chat_completion_reserve,
+            "tokenizer_id": settings.llm_tokenizer_id,
+            "tokenizer_loaded": llm_tok.get("loaded"),
+            "tokenizer_fallbacks": llm_tok.get("fallback_count"),
+            "tokenizer_last_error": llm_tok.get("error"),
         },
         "retrieval": {
             "min_context_similarity": settings.min_context_similarity,

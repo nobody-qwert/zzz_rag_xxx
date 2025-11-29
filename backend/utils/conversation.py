@@ -34,7 +34,7 @@ def build_distilled_query(history_summary: str, question: str) -> str:
 def trim_history_for_budget(
     history: List[Dict[str, str]],
     *,
-    model: str,
+    tokenizer_id: str,
     token_limit: int,
     system_prompt: str,
 ) -> Tuple[List[Dict[str, str]], bool, int]:
@@ -43,7 +43,7 @@ def trim_history_for_budget(
     while trimmed:
         total = estimate_messages_tokens(
             [{"role": "system", "content": system_prompt}, *trimmed],
-            model=model,
+            tokenizer_id=tokenizer_id,
         )
         if total <= token_limit:
             return trimmed, history_truncated, total
@@ -52,7 +52,7 @@ def trim_history_for_budget(
 
     total = estimate_messages_tokens(
         [{"role": "system", "content": system_prompt}],
-        model=model,
+        tokenizer_id=tokenizer_id,
     )
     return [], history_truncated, total
 
