@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from typing import Iterable, Optional
 
 try:
@@ -18,28 +17,19 @@ except ImportError:  # pragma: no cover
         truncate_text,
     )
 
-_FALLBACK_CHARS_PER_TOKEN = 4
-
-
-def _fallback_token_estimate(text: str) -> int:
-    return max(1, math.ceil(len(text) / _FALLBACK_CHARS_PER_TOKEN))
-
-
 def estimate_tokens(
     text: str,
     *,
     tokenizer_id: Optional[str] = None,
     model: Optional[str] = None,
 ) -> int:
-    if not text:
-        return 0
     identifier = (tokenizer_id or model or "").strip()
-    if identifier:
-        token_count = count_text_tokens(text, identifier)
-        if token_count is not None:
-            return token_count
-        record_tokenizer_fallback(identifier, "text_count_fallback")
-    return _fallback_token_estimate(text)
+    if not identifier:
+        raise ValueError("tokenizer_id or model must be provided for token estimation")
+    token_count = count_text_tokens(text or "", identifier)
+    if token_count is None:
+        raise RuntimeError(f"Tokenizer {identifier} unavailable for token estimation")
+    return token_count
 
 
 def estimate_messages_tokens(
@@ -49,17 +39,13 @@ def estimate_messages_tokens(
     model: Optional[str] = None,
 ) -> int:
     identifier = (tokenizer_id or model or "").strip()
+    if not identifier:
+        raise ValueError("tokenizer_id or model must be provided for message token estimation")
     cached_messages = list(messages)
-    if identifier:
-        token_count = count_chat_tokens(cached_messages, identifier)
-        if token_count is not None:
-            return token_count
-        record_tokenizer_fallback(identifier, "chat_count_fallback")
-    total = 0
-    for message in cached_messages:
-        total += 4  # per-message structural overhead heuristic
-        total += estimate_tokens(str(message.get("content", "")), tokenizer_id=identifier or None)
-    return total + 2  # assistant priming per OpenAI guideline
+    token_count = count_chat_tokens(cached_messages, identifier)
+    if token_count is None:
+        raise RuntimeError(f"Tokenizer {identifier} unavailable for message token estimation")
+    return token_count
 
 
 def truncate_text_to_tokens(
@@ -77,5 +63,5 @@ def truncate_text_to_tokens(
         if truncated is not None:
             return truncated
         record_tokenizer_fallback(identifier, "truncate_fallback")
-    approx_chars = max_tokens * _FALLBACK_CHARS_PER_TOKEN
+    approx_chars = max_tokens * 4
     return text[:approx_chars]
