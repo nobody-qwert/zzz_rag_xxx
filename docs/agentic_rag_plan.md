@@ -329,107 +329,51 @@ This gives you **fine-grained control** and observability:
 - You can enforce strict limits on tools / buckets.
 - When `llm_review_evidence` signals a clarification (No/Low Results vs Result Overload), call the corresponding templates from Section 10 so the user understands what failed before narrowing their request.
 
-### 4.1. High-Level Workflow Diagram
+### 4.1. Comprehensive Workflow Diagram
+
+A single diagram now combines preprocessing, decomposition, route scoring, iterative search, clarification prompts, and answer generation with the prompt markers `(P1–P5)` used throughout this doc.
 
 ```mermaid
-flowchart LR
-    UQ[User Query] --> PRE["Preprocess & intent detection (P1)"]
-    PRE --> ROUTE["Route selection & tool plan (P2)"]
-    ROUTE --> EXEC[Execute retrieval tools]
-    EXEC --> EVAL{Evidence status?}
-    EVAL -->|Sufficient + manageable| BUNDLE[Assemble & compress evidence]
-    BUNDLE --> PROMPT["Prompt LLM & craft answer (P5)"]
-    PROMPT --> POST[Post-process, log, update convo state]
-    POST --> NEXT[Next user turn]
-
-    EVAL -->|Insufficient| RELAX[Auto-relax filters & thresholds]
-    RELAX -->|Recovered evidence| PRE
-    RELAX -->|Still empty| CLAR_NOLOW["Clarify (No/Low results) (P3)"]
-    EVAL -->|Overflow| CLAR_OVERLOAD["Clarify (Result overload) (P4)"]
-    CLAR_NOLOW --> PRE
-    CLAR_OVERLOAD --> PRE
+flowchart TD
+    U[User Query]
+    U --> PRE["Preprocess + conversation summary<br/>Intent detect (P1)"]
+    PRE --> DECOMP["Query decomposition ➜ JSON plan<br/>(intent, buckets, constraints)"]
+    DECOMP --> PLAN["plan_search (Mode 1)<br/>initial buckets & queries"]
+    PLAN --> ROUTER["Route selection prompt (P2)<br/>score structured / hybrid / long-text"]
+    ROUTER -->|Structured| STRUCT["Annotations-first route<br/>annotations_search + aggregate"]
+    ROUTER -->|Hybrid| HYBRID["Annotations + search_text/search_semantic"]
+    ROUTER -->|Long text| LONG["Summary ➜ segment vectors"]
+    STRUCT --> LOOP
+    HYBRID --> LOOP
+    LONG --> LOOP
+    LOOP["review_evidence (Mode 2)<br/>decide next tool / fallback"]
+    LOOP -->|next_tool_call| TOOL["Execute tool call<br/>search_text / search_semantic / annotations"]
+    TOOL --> LOG["Append snippets/rows to evidence log"]
+    LOG --> LOOP
+    LOOP -->|fallback route / auto-relax| ROUTER
+    LOOP -->|clarify: No/Low| CLAR_LOW["Clarification (P3)<br/>Summarize attempts + ask for constraints"]
+    LOOP -->|clarify: Overload| CLAR_OVER["Clarification (P4)<br/>Report overflow + request filters"]
+    CLAR_LOW --> PRE
+    CLAR_OVER --> PRE
+    LOOP -->|enough evidence| COMPOSE["compose_answer (Mode 3, P5)<br/>Answer with citations"]
+    COMPOSE --> POST["Post-process + store router decisions<br/>Update conversation summary"]
+    POST --> NEXT["Next user turn / follow-up"]
 
     style PRE fill:#fef9c3,stroke:#d97706,color:#000
-    style ROUTE fill:#fef9c3,stroke:#d97706,color:#000,stroke-width:4px
-    style EXEC fill:#fef9c3,stroke:#d97706,color:#000
-    style EVAL fill:#fef9c3,stroke:#d97706,color:#000
-    style RELAX fill:#fef9c3,stroke:#d97706,color:#000
-    style CLAR_NOLOW fill:#dcfce7,stroke:#15803d,color:#000,stroke-width:4px
-    style CLAR_OVERLOAD fill:#dcfce7,stroke:#15803d,color:#000,stroke-width:4px
-    style BUNDLE fill:#fef9c3,stroke:#d97706,color:#000
-    style PROMPT fill:#dcfce7,stroke:#15803d,color:#000
+    style DECOMP fill:#fef9c3,stroke:#d97706,color:#000
+    style PLAN fill:#fef9c3,stroke:#d97706,color:#000
+    style ROUTER fill:#dcfce7,stroke:#15803d,color:#000,stroke-width:2px
+    style STRUCT fill:#fef9c3,stroke:#d97706,color:#000
+    style HYBRID fill:#fef9c3,stroke:#d97706,color:#000
+    style LONG fill:#fef9c3,stroke:#d97706,color:#000
+    style LOOP fill:#dcfce7,stroke:#15803d,color:#000,stroke-width:2px
+    style TOOL fill:#fef9c3,stroke:#d97706,color:#000
+    style LOG fill:#fef9c3,stroke:#d97706,color:#000
+    style CLAR_LOW fill:#dcfce7,stroke:#15803d,color:#000,stroke-width:2px
+    style CLAR_OVER fill:#dcfce7,stroke:#15803d,color:#000,stroke-width:2px
+    style COMPOSE fill:#dcfce7,stroke:#15803d,color:#000,stroke-width:2px
     style POST fill:#fef9c3,stroke:#d97706,color:#000
-```
-
-### 4.2. Route Selection Detail
-
-This mirrors the cheat sheet in Section 3.4 but visualizes how the router evaluates structured/hybrid/long-text paths and queues fallbacks.
-
-```mermaid
-flowchart TD
-    INTENT["Intent classification LLM (P1)"]
-    HISTORY[Conversation summary / follow-up cues]
-
-    INTENT --> PROMPT[Assemble route-selection prompt]
-    HISTORY --> PROMPT
-
-    PROMPT --> LLM["LLM route planner (P2)"]
-    LLM --> SCORE[Ranked routes + fallbacks]
-
-    SCORE -->|Structured| STRUCT_ROUTE[Plan annotations_search + aggregate]
-    SCORE -->|Hybrid| HYBRID_ROUTE[Plan annotations + vector/text search]
-    SCORE -->|Long text| LONG_ROUTE[Plan summary + segment vector search]
-
-    STRUCT_ROUTE --> CHECK{Results sufficient?}
-    HYBRID_ROUTE --> CHECK
-    LONG_ROUTE --> CHECK
-
-    CHECK -->|No| FALLBACK[Queue next-best route or ask clarification]
-    FALLBACK --> SCORE
-    CHECK -->|Yes| EXECUTE[Execute selected plan]
-
-    style INTENT fill:#dcfce7,stroke:#15803d,color:#000
-    style PROMPT fill:#fef9c3,stroke:#d97706,color:#000
-    style LLM fill:#dcfce7,stroke:#15803d,color:#000
-    style SCORE fill:#fef9c3,stroke:#d97706,color:#000
-    style STRUCT_ROUTE fill:#fef9c3,stroke:#d97706,color:#000
-    style HYBRID_ROUTE fill:#fef9c3,stroke:#d97706,color:#000
-    style LONG_ROUTE fill:#fef9c3,stroke:#d97706,color:#000
-    style CHECK fill:#fef9c3,stroke:#d97706,color:#000
-    style FALLBACK fill:#fef9c3,stroke:#d97706,color:#000
-    style EXECUTE fill:#fef9c3,stroke:#d97706,color:#000
-```
-
-### 4.3. Clarification & Multi-turn Loop
-
-Use this diagram when wiring the `clarify` branch from the pseudo-code into concrete prompts (Section 10).
-
-```mermaid
-flowchart TD
-    DETECT[Detect zero hits / low confidence / overload]
-    DETECT --> AUTORELAX[Auto-relax filters & thresholds]
-    AUTORELAX --> CHECK{Resolved without clarification?}
-
-    CHECK -->|Yes| PREPROCESS[Return to preprocess step]
-    CHECK -->|No| ISSUE{Issue type?}
-    ISSUE -->|No/Low evidence| ASK_LOW["Clarification (No/Low results) (P3)"]
-    ISSUE -->|Result overload| ASK_OVER["Clarification (Result overload) (P4)"]
-
-    ASK_LOW --> CAPTURE_LOW[Capture new constraints + update summary]
-    ASK_OVER --> CAPTURE_OVER[Capture filters/preferences + update summary]
-
-    CAPTURE_LOW --> PREPROCESS
-    CAPTURE_OVER --> PREPROCESS
-
-    style DETECT fill:#fef9c3,stroke:#d97706,color:#000
-    style AUTORELAX fill:#fef9c3,stroke:#d97706,color:#000
-    style CHECK fill:#fef9c3,stroke:#d97706,color:#000
-    style ISSUE fill:#fef9c3,stroke:#d97706,color:#000
-    style ASK_LOW fill:#dcfce7,stroke:#15803d,color:#000,stroke-width:4px
-    style ASK_OVER fill:#dcfce7,stroke:#15803d,color:#000,stroke-width:4px
-    style CAPTURE_LOW fill:#fef9c3,stroke:#d97706,color:#000
-    style CAPTURE_OVER fill:#fef9c3,stroke:#d97706,color:#000
-    style PREPROCESS fill:#fef9c3,stroke:#d97706,color:#000
+    style NEXT fill:#fef9c3,stroke:#d97706,color:#000
 ```
 
 ---
