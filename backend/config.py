@@ -80,7 +80,7 @@ def load_settings() -> AppSettings:
 
     chat_completion_max_tokens = _int_env("CHAT_COMPLETION_MAX_TOKENS", "2048")
     chat_completion_reserve = _int_env("CHAT_COMPLETION_RESERVE", str(chat_completion_max_tokens))
-    llm_context_size = _int_env("CHAT_CONTEXT_SIZE", os.environ.get("LLM_CONTEXT_SIZE", "10000"))
+    llm_context_size = _int_env("LLM_CONTEXT_SIZE", "10000")
 
     ocr_parser_key = _str_env("OCR_PARSER_KEY", "mineru").lower()
     chunk_size = _int_env("CHUNK_SIZE", "200")
