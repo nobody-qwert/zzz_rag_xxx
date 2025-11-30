@@ -13,9 +13,12 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 import numpy as np
+
+from ..extraction.schemas import ExtractionSchema, EXTRACTION_SCHEMAS
+from ..extraction.persistence import MetadataStore, query_chunks_with_metadata_filter
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +37,7 @@ async def search_text(
     bucket: str,
     query: str,
     document_store: Any,
+    settings: Any,
     filters: Optional[Dict[str, Any]] = None,
     top_k: int = 10,
     context_chars: int = 400,
@@ -55,21 +59,15 @@ async def search_text(
         ToolResult with matching chunks
     """
     try:
-        # Get all processed documents
-        all_docs = await document_store.list_documents()
+        schema = _match_schema_for_bucket(bucket)
+        matching_doc_hashes, doc_info_map = await _collect_bucket_documents(
+            document_store=document_store,
+            bucket=bucket,
+            schema=schema,
+            doc_id=doc_id,
+        )
         
-        # Filter by bucket (classification L1) and optional doc_id
-        matching_doc_hashes = []
-        for doc in all_docs:
-            if doc.get("status") != "processed":
-                continue
-            if doc_id and doc["doc_hash"] != doc_id:
-                continue
-            
-            # Check classification
-            classification = await document_store.get_classification(doc["doc_hash"])
-            if classification and classification.get("l1_id") == bucket:
-                matching_doc_hashes.append(doc["doc_hash"])
+        matching_doc_hashes_set = set(matching_doc_hashes)
         
         if not matching_doc_hashes:
             return ToolResult(
@@ -79,13 +77,56 @@ async def search_text(
                 total_found=0,
             )
         
+        # If we have metadata filters and a schema, leverage the extraction tables directly
+        if schema and filters:
+            metadata_rows = await query_chunks_with_metadata_filter(
+                db_path=str(settings.doc_store_path),
+                schema=schema,
+                metadata_filters=filters,
+                text_search=query or None,
+                limit=max(top_k, 50),
+            )
+            
+            if not metadata_rows:
+                return ToolResult(
+                    tool_name="search_text",
+                    success=True,
+                    results=[],
+                    total_found=0,
+                )
+            
+            results: List[Dict[str, Any]] = []
+            for row in metadata_rows:
+                doc_hash = row.get("doc_hash")
+                if doc_hash and doc_hash not in matching_doc_hashes_set:
+                    continue
+                text_preview = (row.get("text") or "")[:context_chars]
+                results.append({
+                    "doc_hash": doc_hash,
+                    "chunk_id": row.get("chunk_id"),
+                    "order_index": row.get("order_index", 0),
+                    "text": text_preview,
+                    "document_name": row.get("original_name") or row.get("document_name") or "Unknown",
+                    "score": 1.0,
+                    "match_type": "keyword+metadata" if query else "metadata",
+                })
+                if len(results) >= top_k:
+                    break
+            
+            return ToolResult(
+                tool_name="search_text",
+                success=True,
+                results=results,
+                total_found=len(results),
+            )
+        
         # Search chunks with LIKE query
         results = []
         search_terms = query.lower().split()
         
         for doc_hash in matching_doc_hashes:
             chunks = await document_store.fetch_chunks(doc_hash=doc_hash)
-            doc_info = await document_store.get_document(doc_hash)
+            doc_info = doc_info_map.get(doc_hash) or await document_store.get_document(doc_hash)
             
             for chunk in chunks:
                 chunk_text = chunk.get("text", "").lower()
@@ -130,6 +171,7 @@ async def search_semantic(
     document_store: Any,
     embedding_client: Any,
     embedding_cache: Any,
+    settings: Any,
     filters: Optional[Dict[str, Any]] = None,
     top_k: int = 10,
     context_chars: int = 500,
@@ -164,21 +206,24 @@ async def search_semantic(
         
         query_vec = np.asarray(query_vectors[0], dtype=np.float32)
         
-        # Get documents matching the bucket
-        all_docs = await document_store.list_documents()
-        matching_doc_hashes = set()
+        schema = _match_schema_for_bucket(bucket)
+        matching_doc_hashes, doc_info_map = await _collect_bucket_documents(
+            document_store=document_store,
+            bucket=bucket,
+            schema=schema,
+            doc_id=doc_id,
+        )
+        matching_doc_hashes_set: Set[str] = set(matching_doc_hashes)
         
-        for doc in all_docs:
-            if doc.get("status") != "processed":
-                continue
-            if doc_id and doc["doc_hash"] != doc_id:
-                continue
-            
-            classification = await document_store.get_classification(doc["doc_hash"])
-            if classification and classification.get("l1_id") == bucket:
-                matching_doc_hashes.add(doc["doc_hash"])
+        if schema and filters and matching_doc_hashes_set:
+            matching_doc_hashes_set = await _filter_doc_hashes_by_metadata(
+                matching_doc_hashes_set,
+                schema,
+                filters,
+                settings,
+            )
         
-        if not matching_doc_hashes:
+        if not matching_doc_hashes_set:
             return ToolResult(
                 tool_name="search_semantic",
                 success=True,
@@ -226,11 +271,11 @@ async def search_semantic(
             chunk = chunks[0]
             doc_hash = chunk.get("doc_hash")
             
-            # Filter by bucket
-            if doc_hash not in matching_doc_hashes:
+            # Filter by bucket/metadata
+            if doc_hash not in matching_doc_hashes_set:
                 continue
             
-            doc_info = await document_store.get_document(doc_hash)
+            doc_info = doc_info_map.get(doc_hash) or await document_store.get_document(doc_hash)
             
             results.append({
                 "doc_hash": doc_hash,
@@ -335,6 +380,95 @@ async def get_document_metadata(
         )
 
 
+def _normalize(text: Optional[str]) -> str:
+    return (text or "").strip().lower()
+
+
+def _match_schema_for_bucket(bucket: str) -> Optional[ExtractionSchema]:
+    bucket_norm = _normalize(bucket)
+    if not bucket_norm:
+        return None
+    for schema in EXTRACTION_SCHEMAS.values():
+        candidates = [
+            schema.schema_id,
+            schema.display_name,
+            schema.target_l2_category,
+        ]
+        for candidate in candidates:
+            if _normalize(candidate) == bucket_norm:
+                return schema
+    return None
+
+
+async def _collect_bucket_documents(
+    document_store: Any,
+    bucket: str,
+    schema: Optional[ExtractionSchema],
+    doc_id: Optional[str] = None,
+) -> tuple[List[str], Dict[str, Any]]:
+    """Return matching doc hashes and a map of doc info for the requested bucket."""
+    docs = await document_store.list_documents()
+    matches: List[str] = []
+    doc_info_map: Dict[str, Any] = {}
+    bucket_norm = _normalize(bucket)
+    schema_l1 = _normalize(schema.target_l1_category) if schema else ""
+    schema_l2 = _normalize(schema.target_l2_category) if schema and schema.target_l2_category else ""
+    
+    for doc in docs:
+        if doc.get("status") != "processed":
+            continue
+        if doc_id and doc["doc_hash"] != doc_id:
+            continue
+        
+        classification = await document_store.get_classification(doc["doc_hash"])
+        if not classification:
+            continue
+        
+        l1_id = _normalize(classification.get("l1_id"))
+        l1_name = _normalize(classification.get("l1_name"))
+        l2_id = _normalize(classification.get("l2_id"))
+        l2_name = _normalize(classification.get("l2_name"))
+        
+        if schema:
+            if l1_id != schema_l1:
+                continue
+            if schema_l2 and l2_id != schema_l2:
+                continue
+        elif bucket_norm:
+            if bucket_norm not in {l1_id, l1_name, l2_id, l2_name}:
+                continue
+        
+        matches.append(doc["doc_hash"])
+        doc_info_map[doc["doc_hash"]] = doc
+    
+    return matches, doc_info_map
+
+
+async def _filter_doc_hashes_by_metadata(
+    doc_hashes: Set[str],
+    schema: ExtractionSchema,
+    filters: Optional[Dict[str, Any]],
+    settings: Any,
+) -> Set[str]:
+    """Filter doc hashes using metadata filters."""
+    if not filters:
+        return doc_hashes
+    
+    if not doc_hashes:
+        return set()
+    
+    meta_store = MetadataStore(str(settings.doc_store_path))
+    rows = await meta_store.query_metadata(
+        schema=schema,
+        filters=filters,
+        limit=max(len(doc_hashes), 100),
+    )
+    allowed = {row.get("doc_hash") for row in rows if row.get("doc_hash")}
+    if not allowed:
+        return set()
+    return {doc_hash for doc_hash in doc_hashes if doc_hash in allowed}
+
+
 async def execute_tool(
     tool_name: str,
     args: Dict[str, Any],
@@ -353,6 +487,7 @@ async def execute_tool(
             bucket=args.get("bucket", ""),
             query=args.get("query", ""),
             document_store=document_store,
+            settings=settings,
             filters=args.get("filters"),
             top_k=args.get("top_k", 10),
             context_chars=args.get("context_chars", 400),
@@ -366,6 +501,7 @@ async def execute_tool(
             document_store=document_store,
             embedding_client=embedding_client,
             embedding_cache=embedding_cache,
+            settings=settings,
             filters=args.get("filters"),
             top_k=args.get("top_k", 10),
             context_chars=args.get("context_chars", 500),

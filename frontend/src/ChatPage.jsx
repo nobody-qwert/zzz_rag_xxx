@@ -203,7 +203,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
     return [];
   }, [messages]);
 
-  const api = { askStream: "/api/ask/stream" };
+  const api = { askStream: "/api/ask/agentic/stream" };
   useEffect(() => { if (onAskingChange) onAskingChange(asking || warmingUp || continuing); }, [asking, warmingUp, continuing, onAskingChange]);
   useEffect(() => {
     const el = messagesBodyRef.current;

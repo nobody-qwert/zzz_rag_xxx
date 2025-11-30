@@ -15,6 +15,15 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+try:
+    from ..dependencies import document_store, settings, embedding_cache, gpu_phase_manager
+    from ..embeddings import EmbeddingClient
+    from ..services.agentic import agentic_answer, stream_agentic_answer
+except ImportError:  # pragma: no cover - package import fallback
+    from dependencies import document_store, settings, embedding_cache, gpu_phase_manager  # type: ignore
+    from embeddings import EmbeddingClient  # type: ignore
+    from services.agentic import agentic_answer, stream_agentic_answer  # type: ignore
+
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["agentic"])
 
@@ -73,10 +82,6 @@ async def ask_agentic(req: AgenticRequest) -> AgenticResponse:
     4. Compose answer with citations
     """
     from openai import AsyncOpenAI
-    
-    from ..dependencies import document_store, settings, embedding_cache, gpu_phase_manager
-    from ..embeddings import EmbeddingClient
-    from ..services.agentic import agentic_answer
     
     query = (req.query or "").strip()
     if not query:
@@ -138,10 +143,6 @@ async def ask_agentic_stream(req: AgenticRequest):
     - {"type": "final", ...} - Final result with metadata
     """
     from openai import AsyncOpenAI
-    
-    from ..dependencies import document_store, settings, embedding_cache, gpu_phase_manager
-    from ..embeddings import EmbeddingClient
-    from ..services.agentic import stream_agentic_answer
     
     query = (req.query or "").strip()
     if not query:
