@@ -34,40 +34,26 @@ flowchart LR
 
 ---
 
-## 3. Schemas & Taxonomy
+## 3. Universal Extraction Strategy
 
-We will define schemas for each top-level category.
+Instead of maintaining rigid schemas for every document type, we will use a **Generic / Auto-Extraction** approach. This allows the system to adapt to Contracts, Manuals, Datasheets, and future types without code changes.
 
-### 3.1. Contracts
-- **Fields:**
-  - `effective_date` (ISO Date)
-  - `expiration_date` (ISO Date)
-  - `parties` (List[String])
-  - `contract_type` (String - e.g. "NDA", "MSA")
-  - `value_amount` (Number)
-  - `value_currency` (String)
+### 3.1. The "Universal" Schema
+The LLM will be prompted to extract:
 
-### 3.2. Invoices / Receipts
-- **Fields:**
-  - `invoice_date` (ISO Date)
-  - `vendor_name` (String)
-  - `invoice_number` (String)
-  - `total_amount` (Number)
-  - `currency` (String)
-  - `line_items_summary` (String)
+1.  **Core Metadata** (Standardized)
+    - `title`: Best guess at document title.
+    - `primary_date`: The most significant date (ISO format).
+    - `primary_entity`: Main organization/author (e.g., Manufacturer, Vendor, Party).
+    - `document_type`: LLM's classification (e.g., "User Manual", "Invoice", "Datasheet").
 
-### 3.3. Datasheets / Technical
-- **Fields:**
-  - `product_name` (String)
-  - `manufacturer` (String)
-  - `revision_date` (ISO Date)
-  - `key_specs` (JSON/Dict - e.g. `{"voltage": "5V", "package": "TO-220"}`)
+2.  **Dynamic Attributes** (Flexible JSON)
+    - A dictionary of key-value pairs specific to the content.
+    - *Example for Datasheet:* `{"voltage": "5V", "package": "TO-220", "power": "1W"}`
+    - *Example for Manual:* `{"model": "Series-X", "topics": ["Maintenance", "Safety"]}`
+    - *Example for Contract:* `{"value": 10000, "currency": "USD", "jurisdiction": "NY"}`
 
-### 3.4. Generic / Miscellaneous
-- **Fields:**
-  - `summary` (String)
-  - `keywords` (List[String])
-  - `document_date` (ISO Date)
+This approach leverages SQLite's JSON querying capabilities (`json_extract`) to allow filtering on these dynamic fields later.
 
 ---
 
