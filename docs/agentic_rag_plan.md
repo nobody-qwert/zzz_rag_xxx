@@ -21,7 +21,7 @@ It is designed for corpora with **100k–1M+ pages**, where:
 
 1. **Indexes / Storage**
    - Pre-chunked text indexed by `bucket`, `doc_id`, `chunk_id`, etc.
-   - **Metadata Stores:** To support strict filtering (e.g., `year=2023`).
+   - **Metadata Stores (`document_annotations`):** Stores structured data extracted via the Schema-Driven Extraction Engine. Supports strict filtering (e.g., `year=2023`) via JSON queries.
    - **Re-Ranking (Backend):** Tools internally fetch high-recall sets (e.g., 100 hits) and re-rank them to a low `top_k` (e.g., 5–10) before returning to the LLM.
 
 2. **Search Tools (API-level)**
@@ -51,6 +51,7 @@ It is designed for corpora with **100k–1M+ pages**, where:
 
 - **Purpose**: Keyword/phrase search with optional metadata filtering.
 - **Backend Note**: Should use a BM25 or similar keyword index.
+- **Filter Note**: `filters` arguments are translated to SQL `WHERE` clauses on the `meta_{bucket}` table.
 
 ```jsonc
 {
@@ -63,7 +64,7 @@ It is designed for corpora with **100k–1M+ pages**, where:
       "query": { "type": "string", "description": "Keyword string." },
       "filters": {
         "type": "object",
-        "description": "Key-value pairs for metadata filtering (e.g., {'year': 2023, 'party': 'ACME'}).",
+        "description": "Key-value pairs matching the schema (e.g., {'total_amount': {'>': 1000}}).",
         "additionalProperties": true,
         "nullable": true
       },
@@ -460,29 +461,50 @@ sequenceDiagram
 
 ---
 
-## 8. Query Decomposition Step (Critical for Complex Prompts)
+## 8. Query Decomposition Step (Two-Phase)
 
-For complex user queries (multi-condition, multi-hop, constraints), it is extremely useful to add an explicit **query decomposition step** *before* the agent starts calling search tools or vector indexes.
+For complex user queries (multi-condition, multi-hop, constraints), we use a **Two-Phase Decomposition** strategy to handle schema scalability. We do not dump *all* table schemas into the context window at once.
 
-**Update**: This section acts as the authoritative source for the `filters` argument used in Sections 2 and 3. The constraints extracted here must be passed to the Planner and subsequently to the Tools.
+### Phase 1: The Router
+**Goal:** Identify the relevant `target_bucket` (e.g., "invoices") and `intent`.
+
+**Prompt:**
+> "User Query: 'Find invoices over $1k from Acme'.
+> Available Buckets: [invoices, contracts, datasheets].
+> Output: {'bucket': 'invoices', 'intent': 'list'}"
+
+### Phase 2: The Schema Planner
+**Goal:** Load the specific schema for the chosen bucket and generate precise filters.
+
+**Input:**
+- Query: "Find invoices over $1k from Acme"
+- Schema (`meta_invoices`): `[invoice_date (DATE), total_amount (REAL), vendor_name (TEXT)]`
+
+**Output (JSON Plan):**
+```json
+{
+  "filters": {
+    "total_amount": { "operator": ">", "value": 1000 },
+    "vendor_name": { "operator": "LIKE", "value": "%Acme%" }
+  },
+  "search_strategy": "hybrid"
+}
+```
 
 ### 8.1. Responsibilities of the Decomposition Step
 
-Given a user query, the LLM should:
+Given a user query, the LLM pipeline should:
 
 1. **Identify intent**  
    - Is the user asking a direct question, a list, a summary, a comparison, a computation, etc.?
 
-2. **Choose primary buckets**  
+2. **Choose primary buckets (Router)**  
    - Which of your buckets are most relevant: `invoices`, `contracts`, `datasheets`, `certificates`, `generic`, etc.?
 
-3. **Extract entities**  
-   - Companies (e.g., “ACME Corp”), people, products, chemicals, etc.
-
-4. **Extract constraints**  
-   - Metadata-style constraints (e.g., `year = 2023`, `party = ACME`)  
-   - Numeric constraints (e.g., `boiling_point_c > 150`)  
-   - Inequalities or ranges (e.g., `termination_notice_days < 60`).  
+3. **Extract entities & constraints (Planner)**  
+   - Map natural language to specific Table Columns.
+   - Numeric constraints (e.g., `total_amount > 1000`)  
+   - Date ranges (e.g., `invoice_date > '2023-01-01'`).
 
 5. **Identify topic terms and subqueries**  
    - Short phrases suitable as search queries for text / semantic search.  
@@ -510,16 +532,16 @@ Below is a flexible schema you can use as the target format for decomposition:
   ],
   "constraints": [
     {
-      "field": "year",
-      "operator": "=",
-      "value": 2023,
-      "raw_text": "2023"
+      "field": "invoice_date",
+      "operator": ">=",
+      "value": "2023-01-01",
+      "raw_text": "from 2023"
     },
     {
-      "field": "termination_notice_days",
-      "operator": "<",
-      "value": 60,
-      "raw_text": "under 60 days"
+      "field": "total_amount",
+      "operator": ">",
+      "value": 1000,
+      "raw_text": "over $1k"
     }
   ],
   "topic_terms": [

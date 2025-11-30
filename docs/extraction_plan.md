@@ -1,120 +1,123 @@
-# Document Extraction & Annotation Plan
+# Document Extraction & Annotation Plan (Revised)
 
 This document outlines the design for adding an **Extraction Phase** to the ingestion pipeline. This phase enriches documents with structured metadata (e.g., Dates, Parties, Amounts) to enable precise filtering in the Agentic RAG workflow.
+
+**Strategy Update:** We are adopting an **On-Demand, Schema-Driven, CSV-based** extraction strategy with **Dedicated SQL Tables**. This ensures cost-efficiency (only extracting what's needed), token-efficiency (CSV output), and high-performance querying (native SQL tables).
 
 ---
 
 ## 1. Objective
 
-Enable the RAG Agent to execute structured queries like *"Find contracts from 2023 with value > $10k"* by pre-extracting these fields into a SQL-queriable format during ingestion.
+Enable the RAG Agent to execute structured queries like *"Find contracts from 2023 with value > $10k"* by pre-extracting these fields into a SQL-queriable format.
 
 ---
 
-## 2. Architecture & Workflow
+## 2. Architecture: "Ingest First, Extract Later"
 
-The Extraction Phase runs **after** the Classification Phase because the schema depends on the document type (L1 Category).
+Unlike the initial plan to run extraction automatically on every document, we will support an **On-Demand Batch Workflow**.
+
+1.  **Ingestion:** Documents are OCR'd, Chunked, and Classified (L1/L2). No deep extraction happens here to save costs.
+2.  **Trigger:** A user (or automated rule) triggers an extraction job for a specific **Category** (e.g., "Invoices") using a defined **Schema**.
+3.  **Execution:** The Generic Extraction Engine iterates over the target documents, uses an LLM to extract data in **CSV format**, and persists the results.
 
 ```mermaid
 flowchart LR
-    OCR[OCR Phase] --> Chunk[Chunk/Embed]
-    Chunk --> Classify[Classification Phase]
-    Classify -->|L1 Category| Extract[Extraction Phase]
-    Extract --> Store[Persist Annotations]
-
-    subgraph Extraction Logic
-    id1[Input: Text + L1='contracts'] --> id2{Select Schema}
-    id2 -->|Contracts Schema| id3[LLM Extraction]
-    id3 -->|JSON| id4[Validate & Normalize]
-    end
+    Ingest[Ingestion Pipeline] --> Classify[Classification L1/L2]
+    Classify --> Store[Document Store]
+    
+    User[User / Admin] -->|Trigger 'Invoices' Job| ExtractEngine[Generic CSV Extractor]
+    Store --> ExtractEngine
+    SchemaConfig[Schema Config] --> ExtractEngine
+    ExtractEngine -->|CSV -> JSON| AnnotationsDB[document_annotations Table]
 ```
-
-### 2.1. Trigger Condition
-- The Extraction Phase runs for all documents where `classification_status = 'classified'`.
-- It uses the `l1_id` (e.g., `contracts`, `invoices`, `datasheets`) to determine *what* to extract.
 
 ---
 
-## 3. Universal Extraction Strategy
+## 3. Generic Extraction Strategy (The "Engine")
 
-Instead of maintaining rigid schemas for every document type, we will use a **Generic / Auto-Extraction** approach. This allows the system to adapt to Contracts, Manuals, Datasheets, and future types without code changes.
+We will implement a single, generic function `extract_batch(docs, schema)` that does not contain hardcoded logic for specific document types.
 
-### 3.1. The "Universal" Schema
-The LLM will be prompted to extract:
+### 3.1. Schema Configuration
+We define "Shapes" of data in a configuration registry. This schema serves two purposes:
+1.  **Prompt Generation:** Telling the LLM what to extract.
+2.  **Table Definition:** Defining the columns for the dedicated SQL table.
 
-1.  **Core Metadata** (Standardized)
-    - `title`: Best guess at document title.
-    - `primary_date`: The most significant date (ISO format).
-    - `primary_entity`: Main organization/author (e.g., Manufacturer, Vendor, Party).
-    - `document_type`: LLM's classification (e.g., "User Manual", "Invoice", "Datasheet").
+**Example Schema (Invoices):**
+```json
+{
+  "target_category": "invoices",
+  "table_name": "meta_invoices",
+  "fields": [
+    {"name": "invoice_number", "type": "TEXT", "desc": "Unique identifier"},
+    {"name": "invoice_date", "type": "DATE", "desc": "Date of issue (ISO)"},
+    {"name": "total_amount", "type": "REAL", "desc": "Total value numeric"},
+    {"name": "currency", "type": "TEXT", "desc": "Currency code (USD, EUR)"},
+    {"name": "vendor_name", "type": "TEXT", "desc": "Issuer organization"}
+  ]
+}
+```
 
-2.  **Dynamic Attributes** (Flexible JSON)
-    - A dictionary of key-value pairs specific to the content.
-    - *Example for Datasheet:* `{"voltage": "5V", "package": "TO-220", "power": "1W"}`
-    - *Example for Manual:* `{"model": "Series-X", "topics": ["Maintenance", "Safety"]}`
-    - *Example for Contract:* `{"value": 10000, "currency": "USD", "jurisdiction": "NY"}`
+### 3.2. CSV-Based LLM Prompting
+To reduce token usage by ~30-40% compared to JSON, we instruct the LLM to output a CSV block.
 
-This approach leverages SQLite's JSON querying capabilities (`json_extract`) to allow filtering on these dynamic fields later.
+> "You are a data extractor. For the following documents, extract these columns: [invoice_date, total_amount...]. Output ONLY a CSV block with headers."
+
+### 3.3. Persistence: Dedicated Tables
+Instead of a generic JSON blob, we map each Category to a **Dedicated Table**.
+*   **Performance:** Native SQL types (REAL, DATE) allow for fast range queries (`amount > 1000`) without JSON parsing overhead.
+*   **Integrity:** We can enforce types and constraints.
+*   **Simplicity:** The CSV output from the LLM maps 1:1 to the table columns.
 
 ---
 
 ## 4. Database Schema
 
-We will introduce a new table `document_annotations` (or `doc_metadata`) to store these fields. To keep it flexible but queriable, we can use a **Hybrid Approach**:
-1.  **Core Columns:** Common fields like `doc_date`, `doc_type` stored as columns for fast indexing.
-2.  **JSON Column:** Domain-specific fields stored as JSONB (or Text in SQLite) for flexibility.
+We will dynamically create tables based on the Schema Registry.
 
-**Proposed Table:** `document_annotations`
+**Core Linking:**
+All metadata tables link back to the main `documents` table via `doc_hash`.
 
+**Example DDL (Auto-Generated):**
 ```sql
-CREATE TABLE document_annotations (
+CREATE TABLE IF NOT EXISTS meta_invoices (
     doc_hash TEXT PRIMARY KEY,
-    -- Core Indexable Fields
-    category_l1 TEXT NOT NULL,
-    primary_date TEXT,       -- effective_date, invoice_date, etc.
-    primary_entity TEXT,     -- party_name, vendor, manufacturer
-    
-    -- Full Structured Data
-    data_json TEXT NOT NULL, -- The full extracted JSON object
-    
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
+    invoice_number TEXT,
+    invoice_date TEXT, -- SQLite uses TEXT for dates
+    total_amount REAL,
+    currency TEXT,
+    vendor_name TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(doc_hash) REFERENCES documents(doc_hash) ON DELETE CASCADE
 );
 ```
 
 ---
 
-## 5. Implementation Plan
+## 5. Integration with Agentic RAG
 
-### Step 1: Define Schemas (`backend/services/ingestion/extraction_schemas.py`)
-- Create Pydantic models or JSON schemas for each L1 category.
-- Define the prompts for the LLM.
+This extraction phase is the **Enabler** for the Agentic RAG plan.
 
-### Step 2: Implement Logic (`backend/services/ingestion/extraction.py`)
-- Function `extract_metadata(doc_hash, text, l1_id)`:
-  - Selects prompt based on L1.
-  - **Optimization:** Prompt the LLM to output **flat JSON** or **CSV** (Key,Value) pairs to reduce token usage and improve speed.
-  - Calls LLM (Qwen).
-  - Parses output into a standard dictionary.
-  - Returns structured data.
-
-### Step 3: Update Worker (`backend/services/ingestion/worker.py`)
-- Add `extraction` to the `DEFAULT_PHASES`.
-- Implement `_run_extraction_phase` similar to `_run_classification_phase`.
-
-### Step 4: Update Persistence (`backend/persistence.py`)
-- Add `document_annotations` table creation.
-- Add `save_document_annotations` method.
-- Add `get_document_annotations` method.
-
-### Step 5: Integration with RAG
-- Update `rag.py` (or the new Agentic Orchestrator) to query `document_annotations` when the Planner requests filters.
+1.  **Shared Truth:** The **Schema Config** serves as the source of truth for the Agent's **Query Decomposer**.
+2.  **Filtering:** The RAG tools (`search_text`, `search_semantic`) will accept a `filters` argument that maps directly to SQL `WHERE` clauses on the metadata table.
+    *   *Agent Query:* `amount > 1000`
+    *   *SQL Translation:* `SELECT d.content FROM documents d JOIN meta_invoices m ON d.doc_hash = m.doc_hash WHERE m.total_amount > 1000`
 
 ---
 
-## 6. Iteration Strategy
+## 6. Implementation Steps (Pilot: Invoices)
 
-1.  **Start Small:** Implement schema for **Invoices** or **Contracts** only first.
-2.  **Test:** Run ingestion on a sample set. Verify SQLite data.
-3.  **Expand:** Add more schemas.
-4.  **Refine:** Tune prompts if extraction is poor.
+### Step 1: Define Schema (`backend/services/ingestion/extraction_schemas.py`)
+- Create the generic Schema registry.
+- Add the `invoices` schema definition with SQL types.
+
+### Step 2: Implement Engine (`backend/services/ingestion/extraction.py`)
+- Implement `extract_metadata_csv(doc_hashes, schema)`.
+- Implement `ensure_table_exists(schema)` to dynamically create tables.
+- Implement CSV-to-SQL-Insert logic.
+
+### Step 3: Update Persistence (`backend/persistence.py`)
+- Remove legacy annotation logic.
+- Add helpers for dynamic table querying.
+
+### Step 4: Add Trigger (`backend/services/ingestion/worker.py`)
+- Add a task/function to trigger extraction for a given L1/L2 category.
