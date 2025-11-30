@@ -33,7 +33,7 @@ class ChunkWindowSpec:
         return max(1, base)
 
 
-def _tokenizer(tokenizer_id: Optional[str]) -> Any:
+def _tokenizer(tokenizer_id: Optional[str] = None) -> Any:
     identifier = (tokenizer_id or "").strip()
     if not identifier:
         return None
@@ -180,7 +180,7 @@ def chunk_text_multi(
     return results
 
 
-def count_text_tokens(text: str) -> int:
+def count_text_tokens(text: str, tokenizer_id: Optional[str] = None) -> int:
     """Return the approximate token count used by the chunker."""
-    enc = _tokenizer()
-    return len(_encode(enc, text))
+    enc = _tokenizer(tokenizer_id)
+    return len(_encode(enc, text, tokenizer_id))
