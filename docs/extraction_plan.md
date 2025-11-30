@@ -72,8 +72,6 @@ CREATE TABLE document_annotations (
     category_l1 TEXT NOT NULL,
     primary_date TEXT,       -- effective_date, invoice_date, etc.
     primary_entity TEXT,     -- party_name, vendor, manufacturer
-    primary_amount REAL,     -- contract value, invoice total
-    currency TEXT,
     
     -- Full Structured Data
     data_json TEXT NOT NULL, -- The full extracted JSON object
@@ -95,8 +93,9 @@ CREATE TABLE document_annotations (
 ### Step 2: Implement Logic (`backend/services/ingestion/extraction.py`)
 - Function `extract_metadata(doc_hash, text, l1_id)`:
   - Selects prompt based on L1.
-  - Calls LLM (Qwen) with `response_format={"type": "json_object"}` (if supported) or prompts for JSON.
-  - Parses and Validates JSON.
+  - **Optimization:** Prompt the LLM to output **flat JSON** or **CSV** (Key,Value) pairs to reduce token usage and improve speed.
+  - Calls LLM (Qwen).
+  - Parses output into a standard dictionary.
   - Returns structured data.
 
 ### Step 3: Update Worker (`backend/services/ingestion/worker.py`)
