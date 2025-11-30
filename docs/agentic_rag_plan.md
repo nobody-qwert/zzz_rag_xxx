@@ -364,9 +364,9 @@ flowchart TD
     style Verify fill:#86efac,stroke:#15803d,stroke-width:2px
 ```
 
-### 6.2. The "Broken Bridge" Fix (Data Flow)
+### 6.2. Data Flow: Passing Constraints to Tools
 
-This diagram highlights exactly how the **metadata gap** is closed. It shows how specific JSON constraints extracted in the beginning are passed into the tool arguments.
+This diagram illustrates the flow of **structured data** through the system. It shows how constraints (like `year=2023`) extracted during the Decomposition step are passed into the Planner and finally injected into the **Tool arguments** (`filters`). This ensures the backend actually executes the specific search the user asked for.
 
 ```mermaid
 graph LR
